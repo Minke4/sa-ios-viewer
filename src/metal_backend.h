@@ -14,6 +14,14 @@
             bounds:(const float *)bounds;
 - (int)uploadTexture:(const unsigned char *)rgba width:(int)w height:(int)h;
 // 子网格：每段索引对应的贴图槽位（-1 表示无贴图）
+- (void)uploadVehicle:(const float *)verts
+               vcount:(int)vcount
+              indices:(const unsigned int *)indices
+               icount:(int)icount;
+- (void)uploadVehicleSubmeshes:(const unsigned int *)firstIndex
+                        counts:(const unsigned int *)indexCount
+                      texSlots:(const int *)texSlots
+                           num:(int)num;
 - (void)uploadSubmeshes:(const unsigned int *)firstIndex
                  counts:(const unsigned int *)indexCount
                texSlots:(const int *)texSlots
@@ -34,6 +42,14 @@
 - (void)lookByDX:(float)dx dy:(float)dy;
 - (void)moveForward:(float)fwd right:(float)right dt:(float)dt;
 - (void)getFpsPosition:(float *)out;
+
+// 驾驶
+- (void)enableDriveMode:(BOOL)on;
+- (BOOL)isDriving;
+- (void)updateDriveWithThrottle:(float)throttle steer:(float)steer brake:(float)brake dt:(float)dt;
+- (void)lookCarByDX:(float)dx dy:(float)dy;
+- (float)carSpeedKmh;
+- (void)getCarPos:(float *)out;
 - (void)setOrbitScale:(float)s;
 - (void)getBounds:(float *)out;
 - (void)getCameraYaw:(float *)yaw pitch:(float *)pitch distance:(float *)dist;

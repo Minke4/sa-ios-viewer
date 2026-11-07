@@ -61,6 +61,16 @@ struct Uniforms {
     std::unique_ptr<sa::CollisionWorld> _coll;
     float _eyeHeight;
     float _walkSpeed;
+
+    // 驾驶
+    BOOL  _driveMode;
+    float _carPos[3];
+    float _carYaw;        // 车头朝向（弧度）
+    float _carSpeed;      // m/s
+    float _carSteer;      // 前轮转角（弧度）
+    float _carWheelSpin;  // 车轮累计旋转
+    float _camYaw;        // 跟随相机朝向
+    float _camPitch;
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device {
@@ -79,6 +89,14 @@ struct Uniforms {
         _walkSpeed = 12.0f;
         _fpsYaw = 0.0f;
         _fpsPitch = 0.0f;
+        _driveMode = NO;
+        _carPos[0] = _carPos[1] = _carPos[2] = 0.0f;
+        _carYaw = 0.0f;
+        _carSpeed = 0.0f;
+        _carSteer = 0.0f;
+        _carWheelSpin = 0.0f;
+        _camYaw = 0.6f;
+        _camPitch = 0.32f;
         _fpsPos[0] = _fpsPos[1] = _fpsPos[2] = 0.0f;
         [self buildPipelines];
     }
@@ -183,6 +201,28 @@ struct Uniforms {
     }
     _textureCount = (int)_textures.size();
     return _textureCount - 1;   // 返回实际槽位
+}
+
+- (void)uploadVehicle:(const float *)verts
+               vcount:(int)vcount
+              indices:(const unsigned int *)indices
+               icount:(int)icount {
+    _carVerts = [_device newBufferWithBytes:verts
+                                     length:(size_t)vcount * sizeof(float) * 12
+                                    options:MTLResourceStorageModeShared];
+    _carIdx = [_device newBufferWithBytes:indices
+                                   length:(size_t)icount * sizeof(unsigned int)
+                                  options:MTLResourceStorageModeShared];
+    _carIndexCount = icount;
+}
+
+- (void)uploadVehicleSubmeshes:(const unsigned int *)firstIndex
+                        counts:(const unsigned int *)indexCount
+                      texSlots:(const int *)texSlots
+                           num:(int)num {
+    _carSubs.clear();
+    for (int i = 0; i < num; ++i)
+        _carSubs.push_back({firstIndex[i], indexCount[i], texSlots[i]});
 }
 
 - (void)uploadSubmeshes:(const unsigned int *)firstIndex
@@ -301,6 +341,92 @@ struct Uniforms {
     _fpsPos[1] += (want - _fpsPos[1]) * std::min(1.0f, dt * 12.0f);
 }
 
+// ---------------- 驾驶 ----------------
+- (void)enableDriveMode:(BOOL)on {
+    _driveMode = on;
+    if (on) {
+        _fpsMode = NO;
+        // 车放在场景中心附近的地面上
+        const float cx = (_bounds[0] + _bounds[3]) * 0.5f;
+        const float cz = (_bounds[2] + _bounds[5]) * 0.5f;
+        float gy = 0;
+        if (_coll && _coll->groundAt(cx, cz, gy)) {
+            _carPos[0] = cx; _carPos[1] = gy; _carPos[2] = cz;
+        } else {
+            _carPos[0] = cx; _carPos[1] = (_bounds[1] + _bounds[4]) * 0.5f; _carPos[2] = cz;
+        }
+        _carYaw = 0.0f;
+        _carSpeed = 0.0f;
+        _carSteer = 0.0f;
+    }
+}
+
+- (BOOL)isDriving { return _driveMode; }
+
+// throttle: -1(倒车)..1(前进)  steer: -1(左)..1(右)  brake: 0..1
+- (void)updateDriveWithThrottle:(float)throttle steer:(float)steer brake:(float)brake dt:(float)dt {
+    if (!_driveMode || dt <= 0) return;
+    const float maxSpeed = 45.0f;      // ~160 km/h
+    const float accel = 14.0f;
+    const float brakeDecel = 22.0f;
+    const float friction = 4.5f;
+
+    // 转向：速度越高，最大转角越小（防止高速甩尾）
+    const float speedRatio = std::fmin(std::fabs(_carSpeed) / maxSpeed, 1.0f);
+    const float maxSteer = 0.55f * (1.0f - 0.72f * speedRatio);
+    _carSteer += (steer * maxSteer - _carSteer) * std::fmin(1.0f, dt * 8.0f);
+
+    if (brake > 0.1f) {
+        const float d = brakeDecel * brake * dt;
+        if (_carSpeed > 0) _carSpeed = std::fmax(0.0f, _carSpeed - d);
+        else _carSpeed = std::fmin(0.0f, _carSpeed + d);
+    } else if (std::fabs(throttle) > 0.05f) {
+        _carSpeed += throttle * accel * dt;
+    } else {
+        // 自然减速
+        const float d = friction * dt;
+        if (_carSpeed > 0) _carSpeed = std::fmax(0.0f, _carSpeed - d);
+        else _carSpeed = std::fmin(0.0f, _carSpeed + d);
+    }
+    _carSpeed = std::fmax(-maxSpeed * 0.35f, std::fmin(maxSpeed, _carSpeed));
+
+    // 转向改变朝向（速度越快转得越快）
+    if (std::fabs(_carSpeed) > 0.3f) {
+        const float turn = _carSteer * _carSpeed * 0.055f * dt;
+        _carYaw += turn;
+    }
+
+    // 位移：车头朝 -Z
+    const float fx = -std::sin(_carYaw);
+    const float fz = -std::cos(_carYaw);
+    const float nx = _carPos[0] + fx * _carSpeed * dt;
+    const float nz = _carPos[2] + fz * _carSpeed * dt;
+
+    // 碰撞：撞墙则停下
+    if (_coll && _coll->blocked(_carPos[0], _carPos[2], nx, nz, _carPos[1] + 0.4f)) {
+        _carSpeed *= -0.25f;
+    } else {
+        _carPos[0] = nx;
+        _carPos[2] = nz;
+    }
+    // 贴地
+    float gy = 0;
+    const bool got = _coll ? _coll->groundAt(_carPos[0], _carPos[2], gy)
+                           : (_ground && _ground->heightAt(_carPos[0], _carPos[2], gy));
+    if (got) _carPos[1] += (gy - _carPos[1]) * std::fmin(1.0f, dt * 8.0f);
+
+    _carWheelSpin += _carSpeed * dt * 3.0f;
+}
+
+- (void)lookCarByDX:(float)dx dy:(float)dy {
+    _camYaw -= dx * 0.004f;
+    _camPitch += dy * 0.003f;
+    _camPitch = std::fmax(-0.2f, std::fmin(1.2f, _camPitch));
+}
+
+- (float)carSpeedKmh { return _carSpeed * 3.6f; }
+- (void)getCarPos:(float *)out { std::memcpy(out, _carPos, sizeof(_carPos)); }
+
 - (void)getFpsPosition:(float *)out { std::memcpy(out, _fpsPos, sizeof(_fpsPos)); }
 - (void)setDebugMode:(int)m { _debugMode = (float)m; }
 - (void)setOrbitScale:(float)s { _orbitScale = s; }
@@ -341,7 +467,18 @@ struct Uniforms {
     float target[3];
     const float up[3] = {0, 1, 0};
 
-    if (_fpsMode) {
+    if (_driveMode) {
+        // 第三人称跟随：相机在车后上方，朝向由 _camYaw/_camPitch 控制
+        const float back = 7.0f + _carSpeed * 0.12f;
+        const float cp3 = std::cos(_camPitch), sp3 = std::sin(_camPitch);
+        const float cy3 = std::cos(_carYaw + _camYaw), sy3 = std::sin(_carYaw + _camYaw);
+        eye[0] = _carPos[0] + back * cp3 * sy3;
+        eye[1] = _carPos[1] + 2.4f + back * sp3;
+        eye[2] = _carPos[2] + back * cp3 * cy3;
+        target[0] = _carPos[0];
+        target[1] = _carPos[1] + 0.9f;
+        target[2] = _carPos[2];
+    } else if (_fpsMode) {
         // 第一人称：站在地面上，视线由 yaw/pitch 决定
         eye[0] = _fpsPos[0]; eye[1] = _fpsPos[1]; eye[2] = _fpsPos[2];
         const float cp2 = std::cos(_fpsPitch), sp2 = std::sin(_fpsPitch);
@@ -362,16 +499,29 @@ struct Uniforms {
     const CGSize ds = view.drawableSize;
     if (ds.width < 1.0 || ds.height < 1.0) return;   // 旋转瞬间可能为 0
     const float aspect = (float)ds.width / (float)ds.height;
-    const float nearZ = _fpsMode ? 0.15f
+    const float nearZ = _driveMode ? 0.2f
+                       : _fpsMode ? 0.15f
                        : (_freeCam ? std::max(0.5f, _distance * 0.01f)
                                    : (_distance * 0.01f + 0.05f));
-    const float farZ  = _fpsMode ? 3000.0f
+    const float farZ  = _driveMode ? 4000.0f
+                       : _fpsMode ? 3000.0f
                        : (_freeCam ? std::max(8000.0f, _distance * 40.0f)
                                    : (_distance * 20.0f + 2000.0f));
-    sa::Mat4 proj = sa::Mat4::perspective(_fpsMode ? 1.35f : (_freeCam ? 1.15f : 1.0f),
-                                          aspect, nearZ, farZ);
+    sa::Mat4 proj = sa::Mat4::perspective(
+        _driveMode ? 1.25f : (_fpsMode ? 1.35f : (_freeCam ? 1.15f : 1.0f)),
+        aspect, nearZ, farZ);
     sa::Mat4 vw = sa::Mat4::lookAt(eye, target, up);
     sa::Mat4 model = sa::Mat4::identity();
+    if (_driveMode) {
+        // 平移 + 绕 Y 轴旋转 + 车轮自转（先不拆轮，整体旋转即可）
+        const float cy4 = std::cos(_carYaw), sy4 = std::sin(_carYaw);
+        sa::Mat4 rot = sa::Mat4::identity();
+        rot.m[0] = cy4; rot.m[2] = -sy4;
+        rot.m[8] = sy4; rot.m[10] = cy4;
+        sa::Mat4 tr = sa::Mat4::identity();
+        tr.m[12] = _carPos[0]; tr.m[13] = _carPos[1]; tr.m[14] = _carPos[2];
+        model = tr * rot;
+    }
     sa::Mat4 mvp = proj * vw * model;
 
     Uniforms u;
@@ -443,6 +593,43 @@ struct Uniforms {
             }
         }
     }
+    // ---- 车辆（用独立变换重算 MVP）
+    if (_driveMode && _carVerts && _carIdx && _carIndexCount > 0) {
+        sa::Mat4 mv = proj * vw * model;
+        Uniforms u2 = u;
+        std::memcpy(u2.mvp, mv.m, sizeof(u2.mvp));
+        std::memcpy(u2.model, model.m, sizeof(u2.model));
+        [enc setVertexBuffer:_carVerts offset:0 atIndex:0];
+        [enc setVertexBytes:&u2 length:sizeof(u2) atIndex:1];
+        [enc setFragmentBytes:&u2 length:sizeof(u2) atIndex:1];
+        int hasT = 1;
+        [enc setFragmentBytes:&hasT length:sizeof(hasT) atIndex:2];
+        [enc setRenderPipelineState:_pipelineTextured];
+        int lastT = -1;
+        for (const auto &cs : _carSubs) {
+            if (cs.count == 0) continue;
+            int slot = cs.tex;
+            if (slot < 0 || slot >= (int)_textures.size()) {
+                int zero = 0;
+                [enc setFragmentBytes:&zero length:sizeof(zero) atIndex:2];
+                [enc setRenderPipelineState:_pipelineSolid];
+                [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                                indexCount:cs.count indexType:MTLIndexTypeUInt32
+                               indexBuffer:_carIdx indexBufferOffset:(NSUInteger)cs.first * 4];
+                [enc setRenderPipelineState:_pipelineTextured];
+                [enc setFragmentBytes:&hasT length:sizeof(hasT) atIndex:2];
+                continue;
+            }
+            if (slot != lastT) {
+                [enc setFragmentTexture:_textures[slot] atIndex:0];
+                lastT = slot;
+            }
+            [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                            indexCount:cs.count indexType:MTLIndexTypeUInt32
+                           indexBuffer:_carIdx indexBufferOffset:(NSUInteger)cs.first * 4];
+        }
+    }
+
     [enc endEncoding];
     [cb presentDrawable:drawable];
     [cb commit];

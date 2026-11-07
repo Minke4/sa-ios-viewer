@@ -95,6 +95,15 @@ if(SA_BUILD_IOS)
   set_source_files_properties(${SCENE_TEXES} PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources/scene/tex)
 
+  # 车辆资源包
+  set(CAR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Resources/car)
+  file(GLOB CAR_TEXES ${CAR_DIR}/tex/*.png)
+  target_sources(${APP_NAME} PRIVATE ${CAR_DIR}/mesh.bin ${CAR_DIR}/meta.json ${CAR_TEXES})
+  set_source_files_properties(${CAR_DIR}/mesh.bin ${CAR_DIR}/meta.json PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources/car)
+  set_source_files_properties(${CAR_TEXES} PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources/car/tex)
+
   target_sources(${APP_NAME} PRIVATE ${PACK_MESH} ${PACK_META} ${PACK_TEXES})
   set_source_files_properties(${PACK_MESH} ${PACK_META} PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources/pack)

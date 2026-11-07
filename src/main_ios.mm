@@ -43,6 +43,18 @@ static NSString *SAFindBundle(void) {
     return nil;
 }
 
+static NSString *SAFindCarBundle(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *res = [[NSBundle mainBundle] resourcePath];
+    NSMutableArray *c = [NSMutableArray array];
+    [c addObject:[[res stringByAppendingPathComponent:@"Resources"] stringByAppendingPathComponent:@"car"]];
+    [c addObject:[res stringByAppendingPathComponent:@"car"]];
+    for (NSString *p in c) {
+        if ([fm fileExistsAtPath:[p stringByAppendingPathComponent:@"mesh.bin"]]) return p;
+    }
+    return nil;
+}
+
 static NSString *SAFindModelsRoot(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSMutableArray *cands = [NSMutableArray array];
@@ -75,6 +87,8 @@ static NSString *SAFindModelsRoot(void) {
 @property (nonatomic, strong) SAJoystickView *joystick;
 @property (nonatomic, strong) UIButton *modeButton;
 @property (nonatomic, assign) BOOL fpsMode;
+@property (nonatomic, assign) BOOL driveMode;
+@property (nonatomic, assign) BOOL hasCar;
 @property (nonatomic, assign) CFAbsoluteTime lastTick;
 @property (nonatomic, strong) CADisplayLink *tick;
 @end
@@ -183,6 +197,13 @@ static NSString *SAFindModelsRoot(void) {
 
 - (void)handlePan:(UIPanGestureRecognizer *)g {
     CGPoint t = [g translationInView:self.view];
+    if (self.driveMode) {
+        CGPoint loc2 = [g locationInView:self.view];
+        if (loc2.x < self.view.bounds.size.width * 0.45) { [g setTranslation:CGPointZero inView:self.view]; return; }
+        [self.renderer lookCarByDX:(float)t.x dy:(float)t.y];
+        [g setTranslation:CGPointZero inView:self.view];
+        return;
+    }
     if (self.fpsMode) {
         // 只在屏幕右半区响应，避免和摇杆冲突
         CGPoint loc = [g locationInView:self.view];
@@ -197,17 +218,37 @@ static NSString *SAFindModelsRoot(void) {
     [g setTranslation:CGPointZero inView:self.view];
 }
 
+// 三态循环：环绕 → 步行 → 驾驶 → 环绕
 - (void)toggleMode {
-    self.fpsMode = !self.fpsMode;
+    if (!self.fpsMode && !self.driveMode) {
+        self.fpsMode = YES;
+        self.driveMode = NO;
+    } else if (self.fpsMode) {
+        self.fpsMode = NO;
+        self.driveMode = self.hasCar;
+    } else {
+        self.fpsMode = NO;
+        self.driveMode = NO;
+    }
+
     [self.renderer setFirstPerson:self.fpsMode];
-    self.joystick.hidden = !self.fpsMode;
-    [self.modeButton setTitle:self.fpsMode ? @"退出漫游" : @"进入漫游" forState:UIControlStateNormal];
-    self.statusLabel.text = self.fpsMode ? @"左侧摇杆移动  ·  右侧拖拽转视角" : @"拖拽环绕  ·  双指缩放";
-    if (self.fpsMode && !self.tick) {
+    [self.renderer enableDriveMode:self.driveMode];
+
+    self.joystick.hidden = !(self.fpsMode || self.driveMode);
+    NSString *title = self.driveMode ? @"退出驾驶"
+                     : self.fpsMode ? @"退出漫游"
+                     : (self.hasCar ? @"进入漫游" : @"进入漫游");
+    [self.modeButton setTitle:title forState:UIControlStateNormal];
+    self.statusLabel.text = self.driveMode ? @"左侧摇杆 前进/后退  ·  右侧拖拽转视角"
+                          : self.fpsMode ? @"左侧摇杆移动  ·  右侧拖拽转视角"
+                          : @"拖拽环绕  ·  双指缩放";
+
+    const BOOL needTick = self.fpsMode || self.driveMode;
+    if (needTick && !self.tick) {
         self.lastTick = CFAbsoluteTimeGetCurrent();
         self.tick = [CADisplayLink displayLinkWithTarget:self selector:@selector(onTick:)];
         [self.tick addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-    } else if (!self.fpsMode && self.tick) {
+    } else if (!needTick && self.tick) {
         [self.tick invalidate];
         self.tick = nil;
     }
@@ -218,6 +259,14 @@ static NSString *SAFindModelsRoot(void) {
     float dt = (float)(now - self.lastTick);
     self.lastTick = now;
     if (dt > 0.1f) dt = 0.1f;
+    if (self.driveMode) {
+        const float throttle = self.joystick.valueY;
+        const float steer = self.joystick.valueX;
+        [self.renderer updateDriveWithThrottle:throttle steer:steer brake:0.0f dt:dt];
+        self.infoLabel.text = [NSString stringWithFormat:@"驾驶模式  %.0f km/h",
+                               [self.renderer carSpeedKmh]];
+        return;
+    }
     if (!self.fpsMode) return;
     const float fwd = self.joystick.valueY;
     const float right = self.joystick.valueX;
@@ -333,6 +382,35 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
                                   groundPath:groundPath];
                 [self.renderer setCollisionPath:
                     [bundlePath stringByAppendingPathComponent:@"collision.bin"]];
+            }
+            // ---- 车辆资源
+            NSString *carPath = SAFindCarBundle();
+            if (carPath) {
+                sa::PackInfo cp;
+                if (sa::loadBundle([carPath UTF8String], cp)) {
+                    [self.renderer uploadVehicle:(const float *)cp.mesh.vertices.data()
+                                          vcount:(int)cp.mesh.vertices.size()
+                                         indices:cp.mesh.indices.data()
+                                          icount:(int)cp.mesh.indices.size()];
+                    std::map<std::string, int> cslot;
+                    for (int i = 0; i < (int)cp.textures.size(); ++i) {
+                        const auto &t = cp.textures[i];
+                        int s4 = [self.renderer uploadTexture:t.rgba.data()
+                                                        width:t.width height:t.height];
+                        cslot[t.name] = s4;
+                    }
+                    std::vector<unsigned int> cf, cc;
+                    std::vector<int> cs;
+                    for (const auto &sm : cp.mesh.submeshes) {
+                        cf.push_back(sm.firstIndex);
+                        cc.push_back(sm.indexCount);
+                        auto it = cslot.find(sm.textureName);
+                        cs.push_back(it == cslot.end() ? -1 : it->second);
+                    }
+                    [self.renderer uploadVehicleSubmeshes:cf.data() counts:cc.data()
+                                                 texSlots:cs.data() num:(int)cf.size()];
+                    self.hasCar = YES;
+                }
             }
             self.modeButton.hidden = !isScene;
             self.infoLabel.text = [NSString stringWithFormat:

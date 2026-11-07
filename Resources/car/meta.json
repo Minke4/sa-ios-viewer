@@ -1,0 +1,106 @@
+{
+  "vehicle": "infernus.dff",
+  "vertexCount": 3573,
+  "indexCount": 9216,
+  "triangleCount": 3072,
+  "bounds": [
+    -1.113917350769043,
+    -0.7875000834465027,
+    -2.863288402557373,
+    2.0712337493896484,
+    0.7922232151031494,
+    2.5888304710388184
+  ],
+  "parts": [
+    {
+      "first": 0,
+      "count": 750,
+      "bone": 0,
+      "tex": ""
+    },
+    {
+      "first": 750,
+      "count": 204,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 954,
+      "count": 60,
+      "bone": 33,
+      "tex": "vehiclegeneric256"
+    },
+    {
+      "first": 1014,
+      "count": 60,
+      "bone": 35,
+      "tex": "vehicleshatter128"
+    },
+    {
+      "first": 1074,
+      "count": 360,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 1434,
+      "count": 378,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 1812,
+      "count": 360,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 2172,
+      "count": 384,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 2556,
+      "count": 312,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 2868,
+      "count": 306,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 3174,
+      "count": 72,
+      "bone": 4294967295,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 3246,
+      "count": 84,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 3330,
+      "count": 372,
+      "bone": 4294967295,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 3702,
+      "count": 384,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    },
+    {
+      "first": 4086,
+      "count": 5130,
+      "bone": 0,
+      "tex": "vehiclegrunge256"
+    }
+  ]
+}

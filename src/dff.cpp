@@ -171,6 +171,18 @@ Geometry parseGeometry(const ChunkView &geo, uint32_t version) {
     if (!found) return g;
     Geometry &out = best;
 
+    // 骨骼绑定：扩展块里的 FrameList，hdr[1]==1 时 hdr[2]==hdr[3] 为骨骼 ID
+    if (const ChunkView *ext = findChild(geo, 0x03)) {
+        for (const auto &k : ext->children) {
+            if (k.type != 0x0E || k.size < 16) continue;
+            const uint32_t h1 = rd32(k.payload + 4);
+            const uint32_t h2 = rd32(k.payload + 8);
+            const uint32_t h3 = rd32(k.payload + 12);
+            if (h1 == 1 && h2 == h3) out.boneIndex = (int)h2;
+            break;
+        }
+    }
+
     // 材质列表：取每个材质的纹理名
     const ChunkView *matList = findChild(geo, 0x08);
     if (matList) {
@@ -210,6 +222,22 @@ Model parseDFF(const std::vector<uint8_t> &buf) {
     std::vector<ChunkView> tops;
     parseChunks(buf.data(), buf.size(), tops);
     for (const auto &top : tops) {
+        // 骨架
+        if (const ChunkView *fl = findChild(top, 0x0E)) {
+            if (const ChunkView *st = findChild(*fl, 0x01)) {
+                const uint32_t nb = rd32(st->payload);
+                const size_t step = 36 + 12 + 4 + 4;
+                for (uint32_t i = 0; i < nb; ++i) {
+                    const size_t o = 4 + (size_t)i * step;
+                    if (o + step > st->size) break;
+                    Bone b;
+                    for (int k = 0; k < 9; ++k) b.rot[k] = rdf(st->payload + o + k * 4);
+                    for (int k = 0; k < 3; ++k) b.pos[k] = rdf(st->payload + o + 36 + k * 4);
+                    b.parent = (int)rd32(st->payload + o + 48);
+                    model.bones.push_back(b);
+                }
+            }
+        }
         walk(top, [&](const ChunkView &c) {
             if (c.type != 0x0F) return;
             // 几何块的版本继承自其所属 Clump 或自身 struct 头

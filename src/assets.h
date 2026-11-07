@@ -113,12 +113,20 @@ struct Geometry {
     float sphere[4] = {0, 0, 0, 0};
     int materialCount = 0;
     std::vector<std::string> materialTextures;   // 每个几何体的材质贴图名
+    int boneIndex = 0;                            // 绑定的骨骼（车辆/分段模型）
     bool valid = false;
     size_t trailing = 0;            // 解析后剩余字节（正确时应为 0）
 };
 
+struct Bone {
+    float rot[9] = {1,0,0, 0,1,0, 0,0,1};
+    float pos[3] = {0,0,0};
+    int parent = -1;
+};
+
 struct Model {
     std::vector<Geometry> geometries;
+    std::vector<Bone> bones;
     std::vector<std::string> textureNames;   // 去重后的贴图需求
     int totalTriangles = 0;
     int totalVertices = 0;
