@@ -42,16 +42,31 @@ fragment float4 fs_main(VSOut in [[stage_in]],
                         texture2d<float> albedo [[texture(0)]],
                         sampler samp [[sampler(0)]],
                         constant int &hasTexture [[buffer(2)]]) {
-    float4 base = in.color;
+    // 基础色：有贴图用贴图，否则用顶点色
+    float3 base;
+    float alpha;
     if (hasTexture != 0) {
         float4 t = albedo.sample(samp, in.uv);
-        base *= t;
+        base = t.rgb;
+        alpha = t.a;
+        // 贴图异常全黑时退回中性色，避免整个模型看不见
+        if (dot(base, float3(1.0)) < 0.02) base = float3(0.72, 0.74, 0.72);
+    } else {
+        base = in.color.rgb;
+        alpha = in.color.a;
     }
+
+    // SA 的预光照数据（vertex color）常是极暗值（如 2/255），
+    // 它们不是"最终颜色"，而是游戏端的占位/调制值。这里只当作轻微
+    // 明暗提示：映射到 [0.85, 1.0]，避免整体变黑。
+    float preAvg = (in.color.r + in.color.g + in.color.b) / 3.0;
+    float preMod = 0.85 + 0.15 * saturate(preAvg);
+
     // 双面 Lambert；无法线时给常量亮度
     float3 n = normalize(in.normal);
     float ndl = fabs(dot(n, normalize(-u.lightDir)));
     float lit = u.ambient + (1.0 - u.ambient) * ndl;
-    float3 rgb = base.rgb * lit;
+    float3 rgb = base * lit * preMod;
     // 轻微 gamma 校正，避免暗部死黑
     rgb = pow(rgb, float3(1.0 / 1.1));
     return float4(rgb, base.a);

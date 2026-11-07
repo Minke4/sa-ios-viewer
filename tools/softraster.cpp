@@ -129,8 +129,11 @@ int main(int argc, char **argv) {
                 const size_t di = (size_t)py * W + px;
                 if (z >= depth[di]) continue;
                 depth[di] = z;
-                float shade = lit;
-                if (nl > 0) shade = std::pow(lit, 1.0f / 1.1f);
+                // 与 Metal 着色器一致：预光照只做轻微调制
+                const auto &vc = mesh.vertices[mesh.indices[t + 0]].color;
+                float preAvg = (vc[0] + vc[1] + vc[2]) / 3.0f;
+                float preMod = 0.85f + 0.15f * std::fmin(1.0f, std::fmax(0.0f, preAvg));
+                float shade = std::pow(lit * preMod, 1.0f / 1.1f);
                 color[di * 3 + 0] = 0.62f * shade;
                 color[di * 3 + 1] = 0.75f * shade;
                 color[di * 3 + 2] = 0.85f * shade;

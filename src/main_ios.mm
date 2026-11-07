@@ -194,10 +194,13 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
 
             self.loaded = YES;
             const float *b = pack.mesh.bounds;
+            int noTex = 0;
+            for (const auto &sm : pack.mesh.submeshes)
+                if (slot.find(sm.textureName) == slot.end()) ++noTex;
             self.infoLabel.text = [NSString stringWithFormat:
-                @"资源包模式\n%d 顶点  %d 三角形\n子网格 %zu  ·  贴图 %zu\n尺寸 %.1f×%.1f×%.1f",
+                @"资源包模式\n%d 顶点  %d 三角形\n子网格 %zu  ·  贴图 %zu（未绑定 %d）\n尺寸 %.1f×%.1f×%.1f",
                 pack.vertexCount, pack.triangleCount, pack.mesh.submeshes.size(),
-                pack.textures.size(), b[3] - b[0], b[4] - b[1], b[5] - b[2]];
+                pack.textures.size(), noTex, b[3] - b[0], b[4] - b[1], b[5] - b[2]];
             self.statusLabel.text = @"拖拽旋转";
             return;
         }
