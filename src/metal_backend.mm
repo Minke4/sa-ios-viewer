@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "metal_backend.h"
+#include "renderer.h"
 
 struct Uniforms {
     float mvp[16];
