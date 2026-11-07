@@ -69,7 +69,7 @@ fragment float4 fs_main(VSOut in [[stage_in]],
     float3 rgb = base * lit * preMod;
     // 轻微 gamma 校正，避免暗部死黑
     rgb = pow(rgb, float3(1.0 / 1.1));
-    return float4(rgb, base.a);
+    return float4(rgb, alpha);
 }
 
 // 无纹理路径（调试用棋盘格）
