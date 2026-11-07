@@ -45,6 +45,13 @@ struct Uniforms {
     id<MTLBuffer> _indexBuffer;
     std::vector<id<MTLTexture>> _textures;
 
+    // 车辆（独立绘制，带自身变换）
+    id<MTLBuffer> _carVerts;
+    id<MTLBuffer> _carIdx;
+    int _carIndexCount = 0;
+    struct CarSub { unsigned first, count; int tex; };
+    std::vector<CarSub> _carSubs;
+
     float _yaw, _pitch, _distance;
     float _bounds[6];
     int   _indexCount;
