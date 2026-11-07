@@ -48,7 +48,7 @@ struct Uniforms {
     // 车辆（独立绘制，带自身变换）
     id<MTLBuffer> _carVerts;
     id<MTLBuffer> _carIdx;
-    int _carIndexCount = 0;
+    int _carIndexCount;
     struct CarSub { unsigned first, count; int tex; };
     std::vector<CarSub> _carSubs;
 
