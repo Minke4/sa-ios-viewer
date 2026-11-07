@@ -1,0 +1,78 @@
+{
+  "model": "farmhouse01",
+  "source": "farmhouse01.dff",
+  "vertexCount": 2268,
+  "indexCount": 4530,
+  "triangleCount": 1510,
+  "bounds": [
+    -14.607412338256836,
+    -13.987977981567383,
+    -6.114722728729248,
+    8.414252281188965,
+    16.330028533935547,
+    8.382437705993652
+  ],
+  "submeshes": [
+    {
+      "first": 0,
+      "count": 42,
+      "tex": "vgsclubdoor02_128"
+    },
+    {
+      "first": 42,
+      "count": 132,
+      "tex": ""
+    },
+    {
+      "first": 174,
+      "count": 1350,
+      "tex": "sjmbigold6"
+    },
+    {
+      "first": 1524,
+      "count": 324,
+      "tex": "sjmbigold2"
+    },
+    {
+      "first": 1848,
+      "count": 672,
+      "tex": "scratchedmetal"
+    },
+    {
+      "first": 2520,
+      "count": 1044,
+      "tex": "gz_vic3d"
+    },
+    {
+      "first": 3564,
+      "count": 102,
+      "tex": "gz_vic2c"
+    },
+    {
+      "first": 3666,
+      "count": 636,
+      "tex": "gz_vic2c"
+    },
+    {
+      "first": 4302,
+      "count": 72,
+      "tex": "ws_cheapodoor2"
+    },
+    {
+      "first": 4374,
+      "count": 156,
+      "tex": "examwind1_LAe"
+    }
+  ],
+  "textures": [
+    "examwind1_LAe",
+    "gz_vic2c",
+    "gz_vic3d",
+    "scratchedmetal",
+    "sjmbigold2",
+    "sjmbigold6",
+    "vgsclubdoor02_128",
+    "ws_cheapodoor2"
+  ],
+  "textureMissing": []
+}

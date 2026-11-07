@@ -14,7 +14,9 @@ add_library(sa_core STATIC
   src/dff.cpp
   src/store.cpp
   src/renderer.cpp
+  src/pack.cpp
 )
+target_link_libraries(sa_core PUBLIC z)
 target_include_directories(sa_core PUBLIC src)
 
 option(SA_BUILD_IOS "Build the iOS viewer app" OFF)
@@ -65,6 +67,26 @@ if(SA_BUILD_IOS)
       COMMENT "复制 default.metallib 到 app 包"
     )
   endif()
+
+  # 把精简资源包塞进 app 包（单一模型的几何 + 贴图，约 0.5 MB）
+  set(PACK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Resources/pack)
+  set(PACK_MESH ${PACK_DIR}/mesh.bin)
+  set(PACK_META ${PACK_DIR}/meta.json)
+  set(PACK_TEXES
+    ${PACK_DIR}/tex/vgsclubdoor02_128.png
+    ${PACK_DIR}/tex/sjmbigold6.png
+    ${PACK_DIR}/tex/sjmbigold2.png
+    ${PACK_DIR}/tex/scratchedmetal.png
+    ${PACK_DIR}/tex/gz_vic3d.png
+    ${PACK_DIR}/tex/gz_vic2c.png
+    ${PACK_DIR}/tex/ws_cheapodoor2.png
+    ${PACK_DIR}/tex/examwind1_LAe.png
+  )
+  target_sources(${APP_NAME} PRIVATE ${PACK_MESH} ${PACK_META} ${PACK_TEXES})
+  set_source_files_properties(${PACK_MESH} ${PACK_META} PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources/pack)
+  set_source_files_properties(${PACK_TEXES} PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources/pack/tex)
 
   target_link_libraries(${APP_NAME} PRIVATE
     "-framework Metal"

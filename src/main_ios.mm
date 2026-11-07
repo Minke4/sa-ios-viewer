@@ -14,8 +14,30 @@
 #include "assets.h"
 #include "renderer.h"
 #include "metal_backend.h"
+#include "pack.h"
 
 // ---------------------------------------------------------------- 资源定位
+// 查找精简资源包（mesh.bin + tex/*.png），优先于 gta3.img
+static NSString *SAFindBundle(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray *cands = [NSMutableArray array];
+    [cands addObject:[[[[fm URLsForDirectory:NSDocumentDirectory
+                                   inDomains:NSUserDomainMask] firstObject] path]
+                      stringByAppendingPathComponent:@"pack"]];
+    NSString *res = [[NSBundle mainBundle] resourcePath];
+    [cands addObject:[[res stringByAppendingPathComponent:@"Resources"]
+                      stringByAppendingPathComponent:@"pack"]];
+    [cands addObject:[res stringByAppendingPathComponent:@"pack"]];
+    // 也接受 Documents/bundles/<名字>
+    [cands addObject:[[[[fm URLsForDirectory:NSDocumentDirectory
+                                   inDomains:NSUserDomainMask] firstObject] path]
+                      stringByAppendingPathComponent:@"bundles/farmhouse01"]];
+    for (NSString *p in cands) {
+        if ([fm fileExistsAtPath:[p stringByAppendingPathComponent:@"mesh.bin"]]) return p;
+    }
+    return nil;
+}
+
 static NSString *SAFindModelsRoot(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSMutableArray *cands = [NSMutableArray array];
@@ -140,6 +162,48 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
 }
 
 - (void)loadAssets {
+    // 1) 优先：精简资源包（不需要 gta3.img）
+    NSString *bundlePath = SAFindBundle();
+    if (bundlePath) {
+        sa::PackInfo pack;
+        if (sa::loadBundle([bundlePath UTF8String], pack)) {
+            [self.renderer uploadMesh:(const float *)pack.mesh.vertices.data()
+                               vcount:(int)pack.mesh.vertices.size()
+                              indices:pack.mesh.indices.data()
+                               icount:(int)pack.mesh.indices.size()
+                               bounds:pack.mesh.bounds];
+
+            std::map<std::string, int> slot;
+            std::vector<unsigned int> firsts, counts;
+            std::vector<int> slots;
+            for (int i = 0; i < (int)pack.textures.size(); ++i) {
+                const auto &t = pack.textures[i];
+                [self.renderer uploadTexture:t.rgba.data() width:t.width height:t.height];
+                slot[t.name] = i;
+            }
+            for (const auto &sm : pack.mesh.submeshes) {
+                firsts.push_back(sm.firstIndex);
+                counts.push_back(sm.indexCount);
+                auto it = slot.find(sm.textureName);
+                slots.push_back(it == slot.end() ? -1 : it->second);
+            }
+            [self.renderer uploadSubmeshes:firsts.data()
+                                    counts:counts.data()
+                                 texSlots:slots.data()
+                                       num:(int)firsts.size()];
+
+            self.loaded = YES;
+            const float *b = pack.mesh.bounds;
+            self.infoLabel.text = [NSString stringWithFormat:
+                @"资源包模式\n%d 顶点  %d 三角形\n子网格 %zu  ·  贴图 %zu\n尺寸 %.1f×%.1f×%.1f",
+                pack.vertexCount, pack.triangleCount, pack.mesh.submeshes.size(),
+                pack.textures.size(), b[3] - b[0], b[4] - b[1], b[5] - b[2]];
+            self.statusLabel.text = @"拖拽旋转";
+            return;
+        }
+    }
+
+    // 2) 其次：完整 gta3.img
     NSString *root = SAFindModelsRoot();
     if (!root) {
         // 没有游戏资源：渲染自测立方体，确认 GPU 管线可用
