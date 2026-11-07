@@ -43,6 +43,7 @@ struct Uniforms {
     int   _textureCount;
     BOOL  _freeCam;       // YES = 场景模式（绕场景中心大轨道飞行）
     float _orbitScale;
+    float _debugMode;   // 0=正常 1=贴图 2=法线 3=光照
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device {
@@ -55,6 +56,7 @@ struct Uniforms {
         _distance = 1.0f;
         _freeCam = NO;
         _orbitScale = 1.0f;
+        _debugMode = 0.0f;
         [self buildPipelines];
     }
     return self;
@@ -137,19 +139,27 @@ struct Uniforms {
     NSLog(@"SA: mesh 上传 %d 顶点 %d 索引，半径 %.2f", vcount, icount, radius);
 }
 
-- (void)uploadTexture:(const unsigned char *)rgba width:(int)w height:(int)h {
-    MTLTextureDescriptor *td = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                     width:w
-                                    height:h
-                                 mipmapped:NO];
-    id<MTLTexture> tex = [_device newTextureWithDescriptor:td];
-    [tex replaceRegion:MTLRegionMake2D(0, 0, w, h)
-           mipmapLevel:0
-             withBytes:rgba
-           bytesPerRow:(NSUInteger)w * 4];
-    _textures.push_back(tex);
+- (int)uploadTexture:(const unsigned char *)rgba width:(int)w height:(int)h {
+    if (!rgba || w <= 0 || h <= 0) return -1;
+    @autoreleasepool {
+        MTLTextureDescriptor *td = [MTLTextureDescriptor
+            texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                         width:w
+                                        height:h
+                                     mipmapped:NO];
+        id<MTLTexture> tex = [_device newTextureWithDescriptor:td];
+        if (!tex) {
+            NSLog(@"SA: 纹理创建失败 %dx%d", w, h);
+            return -1;
+        }
+        [tex replaceRegion:MTLRegionMake2D(0, 0, w, h)
+               mipmapLevel:0
+                 withBytes:rgba
+               bytesPerRow:(NSUInteger)w * 4];
+        _textures.push_back(tex);
+    }
     _textureCount = (int)_textures.size();
+    return _textureCount - 1;   // 返回实际槽位
 }
 
 - (void)uploadSubmeshes:(const unsigned int *)firstIndex
@@ -162,6 +172,7 @@ struct Uniforms {
 }
 
 - (void)setSceneMode:(BOOL)scene { _freeCam = scene; }
+- (void)setDebugMode:(int)m { _debugMode = (float)m; }
 - (void)setOrbitScale:(float)s { _orbitScale = s; }
 - (void)getBounds:(float *)out { std::memcpy(out, _bounds, sizeof(_bounds)); }
 - (void)getCameraYaw:(float *)yaw pitch:(float *)pitch distance:(float *)dist {
@@ -170,6 +181,12 @@ struct Uniforms {
 - (void)setCameraYaw:(float)yaw pitch:(float)pitch { _yaw = yaw; _pitch = pitch; }
 - (void)zoomBy:(float)factor { _distance = std::fmax(0.5f, std::fmin(20000.0f, _distance * factor)); }
 - (int)textureCount { return _textureCount; }
+- (int)subDrawCount { return (int)_subs.size(); }
+- (int)subDrawnCount {
+    int n = 0;
+    for (const auto &sd : _subs) if (sd.count) ++n;
+    return n;
+}
 - (int)indexCount { return _indexCount; }
 
 - (void)drawInView:(MTKView *)view {
@@ -214,7 +231,7 @@ struct Uniforms {
     u.lightDir[0] = -0.4f; u.lightDir[1] = -0.85f; u.lightDir[2] = -0.3f;
     u.ambient = 0.45f;
     u.cameraPos[0] = eye[0]; u.cameraPos[1] = eye[1]; u.cameraPos[2] = eye[2];
-    u.pad = 0;
+    u.pad = _debugMode;
 
     [enc setDepthStencilState:_depthState];
     [enc setCullMode:MTLCullModeNone];
@@ -239,22 +256,37 @@ struct Uniforms {
                        indexBuffer:_indexBuffer
                  indexBufferOffset:0];
     } else {
+        // 先画有贴图的（pipeline 只设一次），再画无贴图的
+        [enc setRenderPipelineState:_pipelineTextured];
+        int hasTexFlag = 1;
+        [enc setFragmentBytes:&hasTexFlag length:sizeof(hasTexFlag) atIndex:2];
+        int lastTex = -1;
         for (const auto &sd : _subs) {
-            if (sd.count == 0) continue;
-            const bool hasTex = sd.tex >= 0 && sd.tex < (int)_textures.size();
-            int hasTexFlag = hasTex ? 1 : 0;
-            [enc setFragmentBytes:&hasTexFlag length:sizeof(hasTexFlag) atIndex:2];
-            if (hasTex) {
-                [enc setRenderPipelineState:_pipelineTextured];
+            if (sd.count == 0 || sd.tex < 0 || sd.tex >= (int)_textures.size()) continue;
+            if (sd.tex != lastTex) {
                 [enc setFragmentTexture:_textures[sd.tex] atIndex:0];
-            } else {
-                [enc setRenderPipelineState:_pipelineSolid];
+                lastTex = sd.tex;
             }
             [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                             indexCount:sd.count
                              indexType:MTLIndexTypeUInt32
                            indexBuffer:_indexBuffer
                      indexBufferOffset:(NSUInteger)sd.first * sizeof(unsigned int)];
+        }
+        // 无贴图部分统一走棋盘格
+        BOOL hasSolid = NO;
+        for (const auto &sd : _subs)
+            if (sd.count && (sd.tex < 0 || sd.tex >= (int)_textures.size())) { hasSolid = YES; break; }
+        if (hasSolid) {
+            [enc setRenderPipelineState:_pipelineSolid];
+            for (const auto &sd : _subs) {
+                if (sd.count == 0 || (sd.tex >= 0 && sd.tex < (int)_textures.size())) continue;
+                [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                                indexCount:sd.count
+                                 indexType:MTLIndexTypeUInt32
+                               indexBuffer:_indexBuffer
+                         indexBufferOffset:(NSUInteger)sd.first * sizeof(unsigned int)];
+            }
         }
     }
     [enc endEncoding];

@@ -72,6 +72,11 @@ fragment float4 fs_main(VSOut in [[stage_in]],
     float ndl = fabs(dot(normalize(n), normalize(-u.lightDir)));
     float lit = u.ambient + (1.0 - u.ambient) * ndl;
 
+    // 调试：u.pad 用于切换输出（0=正常，1=贴图原色，2=法线，3=光照）
+    if (u.pad > 2.5) return float4(lit, lit, lit, 1.0);
+    if (u.pad > 1.5) return float4(fabs(n) * 0.5 + 0.5, 1.0);
+    if (u.pad > 0.5) return float4(base, 1.0);
+
     float3 rgb = base * lit * preMod;
     rgb = pow(saturate(rgb), float3(1.0 / 1.15));
     return float4(rgb, alpha);

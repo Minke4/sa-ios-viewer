@@ -70,6 +70,7 @@ static NSString *SAFindModelsRoot(void) {
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, assign) float yaw, pitch;
 @property (nonatomic, assign) BOOL loaded;
+@property (nonatomic, assign) int debugMode;
 @end
 
 @implementation SAViewController
@@ -109,6 +110,10 @@ static NSString *SAFindModelsRoot(void) {
     [self.view addGestureRecognizer:pan];
     UIPinchGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handlePinch:)];
     [self.view addGestureRecognizer:pinch];
+    // 双击切换调试视图：正常 / 贴图 / 法线 / 光照
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleDoubleTap:)];
+    tap.numberOfTapsRequired = 2;
+    [self.view addGestureRecognizer:tap];
 
     [self loadAssets];
 }
@@ -119,6 +124,13 @@ static NSString *SAFindModelsRoot(void) {
     self.pitch += (float)t.y * 0.006f;
     self.pitch = fmaxf(-1.4f, fminf(1.4f, self.pitch));
     [g setTranslation:CGPointZero inView:self.view];
+}
+
+- (void)handleDoubleTap:(UITapGestureRecognizer *)g {
+    self.debugMode = (self.debugMode + 1) % 4;
+    [self.renderer setDebugMode:self.debugMode];
+    static const char *names[] = {"正常", "贴图原色", "法线", "光照"};
+    self.statusLabel.text = [NSString stringWithFormat:@"调试视图：%s", names[self.debugMode]];
 }
 
 - (void)handlePinch:(UIPinchGestureRecognizer *)g {
@@ -183,8 +195,9 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
             std::vector<int> slots;
             for (int i = 0; i < (int)pack.textures.size(); ++i) {
                 const auto &t = pack.textures[i];
-                [self.renderer uploadTexture:t.rgba.data() width:t.width height:t.height];
-                slot[t.name] = i;
+                // 用返回值作为真实槽位，避免上传失败导致索引错位
+                int s2 = [self.renderer uploadTexture:t.rgba.data() width:t.width height:t.height];
+                slot[t.name] = s2;
             }
             for (const auto &sm : pack.mesh.submeshes) {
                 firsts.push_back(sm.firstIndex);
@@ -200,6 +213,9 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
             // 子网格数量很多说明是场景包
             const BOOL isScene = pack.mesh.submeshes.size() > 40;
             [self.renderer setSceneMode:isScene];
+            // 场景模式先输出贴图原色，排除光照干扰后用户可双击切换
+            self.debugMode = isScene ? 1 : 0;
+            [self.renderer setDebugMode:self.debugMode];
             self.loaded = YES;
             const float *b = pack.mesh.bounds;
             int noTex = 0;
@@ -210,8 +226,11 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
                 isScene ? @"地图场景（Grove Street）" : @"资源包模式",
                 pack.vertexCount, pack.triangleCount, pack.mesh.submeshes.size(),
                 pack.textures.size(), noTex, b[3] - b[0], b[4] - b[1], b[5] - b[2]];
-            self.statusLabel.text = isScene ? @"拖拽环绕  ·  双指缩放"
-                                            : @"拖拽旋转  ·  双指缩放";
+            self.statusLabel.text = [NSString stringWithFormat:
+                @"%@\nGPU 纹理 %d / 子网格 %d（绘制 %d）",
+                isScene ? @"拖拽环绕  ·  双指缩放" : @"拖拽旋转  ·  双指缩放",
+                [self.renderer textureCount], [self.renderer subDrawCount],
+                [self.renderer subDrawnCount]];
             return;
         }
     }
@@ -293,8 +312,9 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
         if (got) {
             std::vector<uint8_t> rgba = t.decodeRGBA();
             if (!rgba.empty()) {
-                [self.renderer uploadTexture:rgba.data() width:t.width height:t.height];
-                texSlot[want] = texLoaded++;
+                int s3 = [self.renderer uploadTexture:rgba.data() width:t.width height:t.height];
+                texSlot[want] = s3 >= 0 ? s3 : -1;
+                if (s3 >= 0) ++texLoaded;
             } else {
                 texSlot[want] = -1;
             }
