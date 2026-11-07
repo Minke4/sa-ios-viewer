@@ -1,6 +1,11 @@
 //
 // ModelRenderer.metal — SA 模型渲染着色器
 //
+// 关于预光照（prelit / vertex color）：
+//   SA 的 DFF 里存的顶点色普遍是极暗值（如 2/255），它不是"最终颜色"，
+//   而是占位/调制值，真实亮度靠引擎的动态光照。因此这里完全不用它当基色，
+//   只用作 ±7% 的轻微明暗提示。
+//
 #include <metal_stdlib>
 using namespace metal;
 
@@ -29,7 +34,6 @@ struct VSOut {
 
 vertex VSOut vs_main(VSIn in [[stage_in]], constant Uniforms &u [[buffer(1)]]) {
     VSOut out;
-    float4 wp = u.model * float4(in.position, 1.0);
     out.position = u.mvp * float4(in.position, 1.0);
     out.normal = normalize((u.model * float4(in.normal, 0.0)).xyz);
     out.uv = in.uv;
@@ -37,46 +41,49 @@ vertex VSOut vs_main(VSIn in [[stage_in]], constant Uniforms &u [[buffer(1)]]) {
     return out;
 }
 
+// 有贴图：贴图色 × 光照 × 微弱预光照提示
 fragment float4 fs_main(VSOut in [[stage_in]],
                         constant Uniforms &u [[buffer(1)]],
                         texture2d<float> albedo [[texture(0)]],
                         sampler samp [[sampler(0)]],
                         constant int &hasTexture [[buffer(2)]]) {
-    // 基础色：有贴图用贴图，否则用顶点色
     float3 base;
-    float alpha;
+    float alpha = 1.0;
+
     if (hasTexture != 0) {
         float4 t = albedo.sample(samp, in.uv);
         base = t.rgb;
         alpha = t.a;
-        // 贴图异常全黑时退回中性色，避免整个模型看不见
-        if (dot(base, float3(1.0)) < 0.02) base = float3(0.72, 0.74, 0.72);
+        // 采样异常（全黑/NaN）时退回中性色，避免整片消失
+        if (!all(isfinite(base)) || dot(base, float3(1.0)) < 0.02)
+            base = float3(0.72, 0.74, 0.72);
     } else {
-        base = in.color.rgb;
-        alpha = in.color.a;
+        base = float3(0.66, 0.70, 0.72);
     }
 
-    // SA 的预光照数据（vertex color）常是极暗值（如 2/255），
-    // 它们不是"最终颜色"，而是游戏端的占位/调制值。这里只当作轻微
-    // 明暗提示：映射到 [0.85, 1.0]，避免整体变黑。
-    float preAvg = (in.color.r + in.color.g + in.color.b) / 3.0;
-    float preMod = 0.85 + 0.15 * saturate(preAvg);
+    // 预光照只做 ±7% 的明暗提示，绝不作为基色
+    float preAvg = saturate((in.color.r + in.color.g + in.color.b) * 0.3333);
+    float preMod = 0.93 + 0.07 * preAvg;
 
-    // 双面 Lambert；无法线时给常量亮度
-    float3 n = normalize(in.normal);
-    float ndl = fabs(dot(n, normalize(-u.lightDir)));
+    // 法线：SA 很多模型不带法线（全 0），此时用屏幕空间导数求面法线
+    float3 n = in.normal;
+    if (dot(n, n) < 1e-12)
+        n = normalize(cross(dfdx(in.position.xyz), dfdy(in.position.xyz)));
+    float ndl = fabs(dot(normalize(n), normalize(-u.lightDir)));
     float lit = u.ambient + (1.0 - u.ambient) * ndl;
+
     float3 rgb = base * lit * preMod;
-    // 轻微 gamma 校正，避免暗部死黑
-    rgb = pow(rgb, float3(1.0 / 1.1));
+    rgb = pow(saturate(rgb), float3(1.0 / 1.15));
     return float4(rgb, alpha);
 }
 
-// 无纹理路径（调试用棋盘格）
+// 无贴图：棋盘格（用于直观确认 UV 与几何是否正确）
 fragment float4 fs_solid(VSOut in [[stage_in]], constant Uniforms &u [[buffer(1)]]) {
-    float3 n = normalize(in.normal);
-    float lit = u.ambient + (1.0 - u.ambient) * fabs(dot(n, normalize(-u.lightDir)));
-    float2 g = floor(in.uv * 8.0);
-    float checker = fmod(g.x + g.y, 2.0) > 0.5 ? 1.0 : 0.85;
-    return float4(float3(0.62, 0.75, 0.85) * lit * checker, 1.0);
+    float3 n = in.normal;
+    if (dot(n, n) < 1e-12)
+        n = normalize(cross(dfdx(in.position.xyz), dfdy(in.position.xyz)));
+    float lit = u.ambient + (1.0 - u.ambient) * fabs(dot(normalize(n), normalize(-u.lightDir)));
+    float2 g = floor(in.uv * 4.0);
+    float checker = fmod(g.x + g.y, 2.0) > 0.5 ? 1.0 : 0.82;
+    return float4(float3(0.66, 0.72, 0.78) * lit * checker, 1.0);
 }
