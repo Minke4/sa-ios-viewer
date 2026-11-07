@@ -20,6 +20,9 @@ Mat4 Mat4::operator*(const Mat4 &o) const {
 Mat4 Mat4::perspective(float fovY, float aspect, float zn, float zf) {
     Mat4 r;
     std::memset(r.m, 0, sizeof(r.m));
+    // 防护：非法参数直接返回单位矩阵，避免 NaN 扩散到整帧
+    if (!(aspect > 1e-4f) || !(zn > 1e-6f) || !(zf > zn)) return r;
+    if (!(fovY > 1e-3f) || fovY > 3.0f) fovY = 1.2f;
     const float f = 1.0f / std::tan(fovY * 0.5f);
     r.m[0] = f / aspect;
     r.m[5] = f;

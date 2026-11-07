@@ -16,13 +16,8 @@
 // 子网格：每段索引对应的贴图槽位（-1 表示无贴图）
 - (void)uploadSubmeshes:(const unsigned int *)firstIndex
                  counts:(const unsigned int *)indexCount
-              texSlots:(const int *)texSlots
-                   num:(int)num;
-// 子网格：每段索引对应的贴图槽位（-1 表示无贴图）
-- (void)uploadSubmeshes:(const unsigned int *)firstIndex
-                counts:(const unsigned int *)indexCount
-             texSlots:(const int *)texSlots
-                  num:(int)num;
+               texSlots:(const int *)texSlots
+                    num:(int)num;
 - (void)drawInView:(MTKView *)view;
 - (void)setSceneMode:(BOOL)scene;
 - (void)setDebugMode:(int)m;

@@ -88,6 +88,7 @@ static NSString *SAFindModelsRoot(void) {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     self.mtkView = [[MTKView alloc] initWithFrame:self.view.bounds device:device];
     self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.mtkView.frame = self.view.bounds;
     self.mtkView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
     self.mtkView.depthStencilPixelFormat = MTLPixelFormatDepth32Float;
     self.mtkView.clearColor = MTLClearColorMake(0.07, 0.09, 0.12, 1.0);
@@ -101,7 +102,6 @@ static NSString *SAFindModelsRoot(void) {
     self.infoLabel.numberOfLines = 0;
     self.infoLabel.textColor = [UIColor colorWithWhite:0.85 alpha:1.0];
     self.infoLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
-    self.infoLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:self.infoLabel];
 
     self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, self.view.bounds.size.height - 80,
@@ -109,7 +109,6 @@ static NSString *SAFindModelsRoot(void) {
     self.statusLabel.numberOfLines = 0;
     self.statusLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
     self.statusLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
-    self.statusLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:self.statusLabel];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
@@ -119,7 +118,6 @@ static NSString *SAFindModelsRoot(void) {
     const CGFloat js = 150;
     self.joystick = [[SAJoystickView alloc] initWithFrame:
         CGRectMake(30, self.view.bounds.size.height - js - 40, js, js)];
-    self.joystick.autoresizingMask = UIViewAutoresizingFlexibleTopMargin;
     self.joystick.hidden = YES;
     [self.view addSubview:self.joystick];
 
@@ -127,7 +125,7 @@ static NSString *SAFindModelsRoot(void) {
     self.modeButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.modeButton.frame = CGRectMake(self.view.bounds.size.width - 130,
                                        self.view.bounds.size.height - 100, 110, 44);
-    self.modeButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleTopMargin;
+
     [self.modeButton setTitle:@"进入漫游" forState:UIControlStateNormal];
     [self.modeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.modeButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.15];
@@ -143,6 +141,44 @@ static NSString *SAFindModelsRoot(void) {
     [self.view addGestureRecognizer:tap];
 
     [self loadAssets];
+}
+
+- (BOOL)shouldAutorotate { return YES; }
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return UIInterfaceOrientationMaskAllButUpsideDown;
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    [coordinator animateAlongsideTransition:^(id ctx) {
+        [self.view setNeedsLayout];
+        [self.view layoutIfNeeded];
+    } completion:^(id ctx) {
+        [self layoutUI];
+    }];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self layoutUI];
+}
+
+// 所有子视图位置在这里统一计算，支持旋转/尺寸变化
+- (void)layoutUI {
+    const CGSize sz = self.view.bounds.size;
+    if (sz.width < 1 || sz.height < 1) return;
+
+    self.mtkView.frame = self.view.bounds;
+    self.infoLabel.frame = CGRectMake(16, 56, sz.width - 32, 90);
+
+    const CGFloat js = 150;
+    self.joystick.frame = CGRectMake(30, sz.height - js - 40, js, js);
+    self.joystick.layer.cornerRadius = js * 0.5;
+
+    self.modeButton.frame = CGRectMake(sz.width - 130, sz.height - 100, 110, 44);
+    self.statusLabel.frame = CGRectMake(16, sz.height - 74, sz.width - 160, 60);
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)g {
@@ -430,11 +466,13 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
 - (void)mtkview:(MTKView *)view drawableSizeWillChange:(CGSize)size {}
 
 - (void)drawInMTKView:(MTKView *)view {
-    if (!self.loaded) {
-        return;
+    if (!self.loaded) return;
+    @autoreleasepool {
+        if (!self.fpsMode) {
+            [self.renderer setCameraYaw:self.yaw pitch:self.pitch];
+        }
+        [self.renderer drawInView:view];
     }
-    [self.renderer setCameraYaw:self.yaw pitch:self.pitch];
-    [self.renderer drawInView:view];
 }
 
 @end

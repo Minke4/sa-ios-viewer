@@ -38,10 +38,6 @@
     }
 }
 
-- (void)setValueX:(float)valueX {
-    _valueX = valueX;
-}
-
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     _tracking = YES;
     [self moveTo:[touches.anyObject locationInView:self]];

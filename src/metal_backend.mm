@@ -326,7 +326,9 @@ struct Uniforms {
         target[0] = cx; target[1] = cy; target[2] = cz;
     }
 
-    const float aspect = (float)view.drawableSize.width / (float)view.drawableSize.height;
+    const CGSize ds = view.drawableSize;
+    if (ds.width < 1.0 || ds.height < 1.0) return;   // 旋转瞬间可能为 0
+    const float aspect = (float)ds.width / (float)ds.height;
     const float nearZ = _fpsMode ? 0.15f
                        : (_freeCam ? std::max(0.5f, _distance * 0.01f)
                                    : (_distance * 0.01f + 0.05f));
