@@ -36,4 +36,18 @@ bool AssetStore::loadTexture(const std::string &name, Texture &out) const {
     return true;
 }
 
+bool AssetStore::loadTextureFrom(const std::string &txdName,
+                                 const std::string &texName, Texture &out) const {
+    std::vector<uint8_t> data;
+    if (!(primary && primary->readEntry(txdName, data)) &&
+        !(fallback && fallback->readEntry(txdName, data)))
+        return false;
+    auto list = parseTXD(data);
+    const std::string want = lower(texName);
+    for (auto &t : list) {
+        if (lower(t.name) == want) { out = std::move(t); return true; }
+    }
+    return false;
+}
+
 }  // namespace sa

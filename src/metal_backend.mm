@@ -32,6 +32,8 @@ struct Uniforms {
     id<MTLDepthStencilState> _depthState;
 
     id<MTLBuffer> _vertexBuffer;
+    struct SubDraw { unsigned int first, count; int tex; };
+    std::vector<SubDraw> _subs;
     id<MTLBuffer> _indexBuffer;
     std::vector<id<MTLTexture>> _textures;
 
@@ -144,6 +146,15 @@ struct Uniforms {
     _textureCount = (int)_textures.size();
 }
 
+- (void)uploadSubmeshes:(const unsigned int *)firstIndex
+                counts:(const unsigned int *)indexCount
+             texSlots:(const int *)texSlots
+                  num:(int)num {
+    _subs.clear();
+    for (int i = 0; i < num; ++i)
+        _subs.push_back({firstIndex[i], indexCount[i], texSlots[i]});
+}
+
 - (void)getBounds:(float *)out { std::memcpy(out, _bounds, sizeof(_bounds)); }
 - (void)getCameraYaw:(float *)yaw pitch:(float *)pitch distance:(float *)dist {
     *yaw = _yaw; *pitch = _pitch; *dist = _distance;
@@ -198,21 +209,41 @@ struct Uniforms {
     [enc setVertexBytes:&u length:sizeof(u) atIndex:1];
     [enc setFragmentBytes:&u length:sizeof(u) atIndex:1];
 
-    int hasTex = _textureCount > 0 ? 1 : 0;
-    [enc setFragmentBytes:&hasTex length:sizeof(hasTex) atIndex:2];
+    [enc setFragmentSamplerState:_sampler atIndex:0];
 
-    if (hasTex) {
-        [enc setRenderPipelineState:_pipelineTextured];
-        [enc setFragmentTexture:_textures[0] atIndex:0];
-        [enc setFragmentSamplerState:_sampler atIndex:0];
+    if (_subs.empty()) {
+        int hasTex = _textureCount > 0 ? 1 : 0;
+        [enc setFragmentBytes:&hasTex length:sizeof(hasTex) atIndex:2];
+        if (hasTex) {
+            [enc setRenderPipelineState:_pipelineTextured];
+            [enc setFragmentTexture:_textures[0] atIndex:0];
+        } else {
+            [enc setRenderPipelineState:_pipelineSolid];
+        }
+        [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                        indexCount:_indexCount
+                         indexType:MTLIndexTypeUInt32
+                       indexBuffer:_indexBuffer
+                 indexBufferOffset:0];
     } else {
-        [enc setRenderPipelineState:_pipelineSolid];
+        for (const auto &sd : _subs) {
+            if (sd.count == 0) continue;
+            const bool hasTex = sd.tex >= 0 && sd.tex < (int)_textures.size();
+            int hasTexFlag = hasTex ? 1 : 0;
+            [enc setFragmentBytes:&hasTexFlag length:sizeof(hasTexFlag) atIndex:2];
+            if (hasTex) {
+                [enc setRenderPipelineState:_pipelineTextured];
+                [enc setFragmentTexture:_textures[sd.tex] atIndex:0];
+            } else {
+                [enc setRenderPipelineState:_pipelineSolid];
+            }
+            [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                            indexCount:sd.count
+                             indexType:MTLIndexTypeUInt32
+                           indexBuffer:_indexBuffer
+                     indexBufferOffset:(NSUInteger)sd.first * sizeof(unsigned int)];
+        }
     }
-    [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-                    indexCount:_indexCount
-                     indexType:MTLIndexTypeUInt32
-                   indexBuffer:_indexBuffer
-             indexBufferOffset:0];
     [enc endEncoding];
     [cb presentDrawable:drawable];
     [cb commit];

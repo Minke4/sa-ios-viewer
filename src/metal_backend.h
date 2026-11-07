@@ -13,6 +13,16 @@
             icount:(int)icount
             bounds:(const float *)bounds;
 - (void)uploadTexture:(const unsigned char *)rgba width:(int)w height:(int)h;
+// 子网格：每段索引对应的贴图槽位（-1 表示无贴图）
+- (void)uploadSubmeshes:(const unsigned int *)firstIndex
+                 counts:(const unsigned int *)indexCount
+              texSlots:(const int *)texSlots
+                   num:(int)num;
+// 子网格：每段索引对应的贴图槽位（-1 表示无贴图）
+- (void)uploadSubmeshes:(const unsigned int *)firstIndex
+                counts:(const unsigned int *)indexCount
+             texSlots:(const int *)texSlots
+                  num:(int)num;
 - (void)drawInView:(MTKView *)view;
 - (void)getBounds:(float *)out;
 - (void)getCameraYaw:(float *)yaw pitch:(float *)pitch distance:(float *)dist;

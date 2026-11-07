@@ -7,6 +7,7 @@
 #import <Foundation/Foundation.h>
 #include <sys/stat.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -103,11 +104,55 @@ static NSString *SAFindModelsRoot(void) {
     (void)baseDist;
 }
 
+// 无游戏资源时的自测几何：一个带 UV 与法线的立方体，
+// 用于验证 Metal 管线（着色器/顶点格式/深度/相机）是否正常工作。
+static void buildSelfTestCube(sa::MeshData &mesh) {
+    const float s = 0.5f;
+    struct Face { float n[3]; float v[4][3]; };
+    const Face faces[6] = {
+        {{1, 0, 0}, {{s, -s, -s}, {s, s, -s}, {s, s, s}, {s, -s, s}}},
+        {{-1, 0, 0}, {{-s, -s, s}, {-s, s, s}, {-s, s, -s}, {-s, -s, -s}}},
+        {{0, 1, 0}, {{-s, s, s}, {s, s, s}, {s, s, -s}, {-s, s, -s}}},
+        {{0, -1, 0}, {{-s, -s, -s}, {s, -s, -s}, {s, -s, s}, {-s, -s, s}}},
+        {{0, 0, 1}, {{-s, -s, s}, {s, -s, s}, {s, s, s}, {-s, s, s}}},
+        {{0, 0, -1}, {{s, -s, -s}, {-s, -s, -s}, {-s, s, -s}, {s, s, -s}}},
+    };
+    for (const auto &f : faces) {
+        const uint32_t base = (uint32_t)mesh.vertices.size();
+        const float uv[4][2] = {{0, 1}, {0, 0}, {1, 0}, {1, 1}};
+        for (int i = 0; i < 4; ++i) {
+            sa::Vertex v{};
+            v.pos[0] = f.v[i][0]; v.pos[1] = f.v[i][1]; v.pos[2] = f.v[i][2];
+            v.normal[0] = f.n[0]; v.normal[1] = f.n[1]; v.normal[2] = f.n[2];
+            v.uv[0] = uv[i][0]; v.uv[1] = uv[i][1];
+            v.color[0] = v.color[1] = v.color[2] = v.color[3] = 1.0f;
+            mesh.vertices.push_back(v);
+        }
+        mesh.indices.insert(mesh.indices.end(),
+                            {base, base + 1, base + 2, base, base + 2, base + 3});
+    }
+    mesh.bounds[0] = mesh.bounds[1] = mesh.bounds[2] = -s;
+    mesh.bounds[3] = mesh.bounds[4] = mesh.bounds[5] = s;
+    sa::SubMesh sm;
+    sm.firstIndex = 0;
+    sm.indexCount = (uint32_t)mesh.indices.size();
+    mesh.submeshes.push_back(sm);
+}
+
 - (void)loadAssets {
     NSString *root = SAFindModelsRoot();
     if (!root) {
-        self.infoLabel.text = @"未找到 gta3.img\n\n请将 models/gta3.img 放入\n「文件」App → 我的 iPhone → SAViewer/";
-        self.statusLabel.text = @"文件路径:\n$DOCUMENTS/models/gta3.img";
+        // 没有游戏资源：渲染自测立方体，确认 GPU 管线可用
+        sa::MeshData cube;
+        buildSelfTestCube(cube);
+        [self.renderer uploadMesh:(const float *)cube.vertices.data()
+                           vcount:(int)cube.vertices.size()
+                          indices:cube.indices.data()
+                           icount:(int)cube.indices.size()
+                           bounds:cube.bounds];
+        self.loaded = YES;
+        self.infoLabel.text = @"GPU 自测模式（立方体）\n\n未找到 gta3.img\n请将 models/gta3.img 放入\n「文件」App → 我的 iPhone → SAViewer/";
+        self.statusLabel.text = @"拖拽旋转  ·  放入游戏文件后重启即可显示真实模型";
         return;
     }
 
@@ -137,32 +182,75 @@ static NSString *SAFindModelsRoot(void) {
                        icount:(int)mesh.indices.size()
                        bounds:mesh.bounds];
 
-    // 加载贴图（模型同名 TXD 内查找）
+    // 加载贴图：优先同名 TXD，其次在全局纹理索引里逐个查找
     int texLoaded = 0;
+    std::vector<std::string> slotNames;   // 槽位 → 纹理名
     std::string txdName = modelName;
     auto dot = txdName.rfind('.');
     if (dot != std::string::npos) txdName = txdName.substr(0, dot);
     txdName += ".txd";
 
-    sa::Texture tex;
+    // 从模型同名 TXD 里一次性建名字表（最常见的情况：贴图就在一起）
+    std::map<std::string, sa::Texture> texBank;
     if (store.primary && store.primary->find(txdName)) {
-        if (store.loadTexture(txdName, tex)) {
-            // 取匹配目标名的那张；否则取第一张
-            std::vector<uint8_t> rgba = tex.decodeRGBA();
-            if (!rgba.empty()) {
-                [self.renderer uploadTexture:rgba.data() width:tex.width height:tex.height];
-                ++texLoaded;
-            }
+        std::vector<uint8_t> txdData;
+        if (store.primary->readEntry(txdName, txdData)) {
+            for (auto &t : sa::parseTXD(txdData))
+                if (!t.name.empty()) texBank[t.name] = std::move(t);
         }
+    }
+
+    std::map<std::string, int> texSlot;
+    for (const auto &sub : mesh.submeshes) {
+        const std::string &want = sub.textureName;
+        if (want.empty()) { slotNames.push_back(""); continue; }
+        if (texSlot.count(want)) { slotNames.push_back(want); continue; }
+
+        sa::Texture t;
+        bool got = false;
+        auto it = texBank.find(want);
+        if (it != texBank.end()) { t = it->second; got = true; }
+        // 同名 TXD 里没有时，先试 gta3.img 中该名字对应的独立 TXD
+        if (!got) got = store.loadTextureFrom(want + ".txd", want, t);
+        if (!got) got = store.loadTexture(want + ".txd", t);
+        if (got) {
+            std::vector<uint8_t> rgba = t.decodeRGBA();
+            if (!rgba.empty()) {
+                [self.renderer uploadTexture:rgba.data() width:t.width height:t.height];
+                texSlot[want] = texLoaded++;
+            } else {
+                texSlot[want] = -1;
+            }
+        } else {
+            texSlot[want] = -1;
+        }
+        slotNames.push_back(want);
+    }
+
+    // 把子网格映射成 [首索引, 索引数, 贴图槽位]
+    {
+        std::vector<unsigned int> firsts, counts;
+        std::vector<int> slots;
+        for (const auto &sub : mesh.submeshes) {
+            firsts.push_back(sub.firstIndex);
+            counts.push_back(sub.indexCount);
+            auto it = texSlot.find(sub.textureName);
+            slots.push_back(it == texSlot.end() ? -1 : it->second);
+        }
+        [self.renderer uploadSubmeshes:firsts.data()
+                                counts:counts.data()
+                             texSlots:slots.data()
+                                   num:(int)firsts.size()];
     }
 
     self.loaded = YES;
     float mnx = mesh.bounds[0], mny = mesh.bounds[1], mnz = mesh.bounds[2];
     float mxx = mesh.bounds[3], mxy = mesh.bounds[4], mxz = mesh.bounds[5];
     self.infoLabel.text = [NSString stringWithFormat:
-        @"%s\n%zu 几何体  %d 顶点  %d 三角形\n贴图 %d 张  尺寸 %.1f×%.1f×%.1f",
+        @"%s\n%zu 几何体  %d 顶点  %d 三角形\n子网格 %zu  ·  贴图 %d/%zu\n尺寸 %.1f×%.1f×%.1f",
         modelName.c_str(), model.geometries.size(), model.totalVertices,
-        model.totalTriangles, texLoaded, mxx - mnx, mxy - mny, mxz - mnz];
+        model.totalTriangles, mesh.submeshes.size(), texLoaded,
+        model.textureNames.size(), mxx - mnx, mxy - mny, mxz - mnz];
     self.statusLabel.text = @"拖拽旋转  ·  双指缩放";
 }
 

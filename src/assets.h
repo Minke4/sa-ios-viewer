@@ -133,6 +133,9 @@ public:
     bool mount(const std::string &imgPath);
     bool loadModel(const std::string &name, Model &out) const;
     bool loadTexture(const std::string &name, Texture &out) const;
+    // 在指定 TXD 中按纹理名取一张
+    bool loadTextureFrom(const std::string &txdName, const std::string &texName,
+                         Texture &out) const;
     // 模型优先在本 IMG 找，其次在 fallback（通常 gta3.img）
     std::shared_ptr<ImgArchive> primary, fallback;
 
