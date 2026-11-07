@@ -10,9 +10,11 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <memory>
 
 #include "metal_backend.h"
 #include "renderer.h"
+#include "ground.h"
 
 // 必须与 Metal 侧布局完全一致：Metal 的 float3 按 16 字节对齐，
 // 因此每个 float3 后面都要显式补 1 个 float，否则后续字段全部错位。
@@ -49,6 +51,14 @@ struct Uniforms {
     BOOL  _freeCam;       // YES = 场景模式（绕场景中心大轨道飞行）
     float _orbitScale;
     float _debugMode;   // 0=正常 1=贴图 2=法线 3=光照
+
+    // 第一人称
+    BOOL  _fpsMode;
+    float _fpsPos[3];       // 摄像机世界坐标
+    float _fpsYaw, _fpsPitch;
+    std::unique_ptr<sa::GroundGrid> _ground;
+    float _eyeHeight;
+    float _walkSpeed;
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device {
@@ -62,6 +72,12 @@ struct Uniforms {
         _freeCam = NO;
         _orbitScale = 1.0f;
         _debugMode = 0.0f;
+        _fpsMode = NO;
+        _eyeHeight = 1.7f;
+        _walkSpeed = 12.0f;
+        _fpsYaw = 0.0f;
+        _fpsPitch = 0.0f;
+        _fpsPos[0] = _fpsPos[1] = _fpsPos[2] = 0.0f;
         [self buildPipelines];
     }
     return self;
@@ -177,6 +193,82 @@ struct Uniforms {
 }
 
 - (void)setSceneMode:(BOOL)scene { _freeCam = scene; }
+
+- (void)setGroundData:(const float *)verts
+               vcount:(int)vcount
+              indices:(const unsigned int *)indices
+               icount:(int)icount
+          groundPath:(NSString *)path {
+    sa::MeshData md;
+    md.vertices.resize(vcount);
+    for (int i = 0; i < vcount; ++i) {
+        md.vertices[i].pos[0] = verts[i * 12 + 0];
+        md.vertices[i].pos[1] = verts[i * 12 + 1];
+        md.vertices[i].pos[2] = verts[i * 12 + 2];
+        md.vertices[i].uv[0] = verts[i * 12 + 6];
+        md.vertices[i].uv[1] = verts[i * 12 + 7];
+    }
+    md.indices.assign(indices, indices + icount);
+    auto g = std::make_unique<sa::GroundGrid>();
+    if (g->load([path UTF8String], md)) {
+        _ground = std::move(g);
+    }
+}
+
+- (void)setFirstPerson:(BOOL)on {
+    _fpsMode = on;
+    if (on) {
+        // 从场景中心开始
+        _fpsPos[0] = (_bounds[0] + _bounds[3]) * 0.5f;
+        _fpsPos[2] = (_bounds[2] + _bounds[5]) * 0.5f;
+        _fpsYaw = 0.0f;
+        _fpsPitch = -0.05f;
+        // 贴地
+        float y = 0;
+        if (_ground && _ground->heightAt(_fpsPos[0], _fpsPos[2], y)) {
+            _fpsPos[1] = y + _eyeHeight;
+        } else {
+            _fpsPos[1] = (_bounds[1] + _bounds[4]) * 0.5f + _eyeHeight;
+        }
+    }
+}
+
+- (BOOL)isFirstPerson { return _fpsMode; }
+
+// 以「屏幕拖拽量」转动视角
+- (void)lookByDX:(float)dx dy:(float)dy {
+    if (!_fpsMode) return;
+    _fpsYaw -= dx * 0.004f;
+    _fpsPitch -= dy * 0.004f;
+    const float lim = 1.45f;
+    if (_fpsPitch > lim) _fpsPitch = lim;
+    if (_fpsPitch < -lim) _fpsPitch = -lim;
+}
+
+// 按输入方向移动（前=+1，右=+1），并贴地
+- (void)moveForward:(float)fwd right:(float)right dt:(float)dt {
+    if (!_fpsMode) return;
+    const float cy = std::cos(_fpsYaw), sy = std::sin(_fpsYaw);
+    // 前方向（水平）
+    const float fx = -sy, fz = -cy;
+    // 右方向
+    const float rx = cy, rz = -sy;
+    float nx = _fpsPos[0] + (fx * fwd + rx * right) * _walkSpeed * dt;
+    float nz = _fpsPos[2] + (fz * fwd + rz * right) * _walkSpeed * dt;
+
+    float gy = 0;
+    if (_ground && _ground->heightAt(nx, nz, gy)) {
+        _fpsPos[0] = nx;
+        _fpsPos[2] = nz;
+        // 平滑贴地，避免台阶瞬跳
+        const float want = gy + _eyeHeight;
+        _fpsPos[1] += (want - _fpsPos[1]) * std::min(1.0f, dt * 12.0f);
+    } else {
+        // 前方没有地面就不动（避免掉出地图）
+    }
+}
+
+- (void)getFpsPosition:(float *)out { std::memcpy(out, _fpsPos, sizeof(_fpsPos)); }
 - (void)setDebugMode:(int)m { _debugMode = (float)m; }
 - (void)setOrbitScale:(float)s { _orbitScale = s; }
 - (void)getBounds:(float *)out { std::memcpy(out, _bounds, sizeof(_bounds)); }
@@ -212,20 +304,37 @@ struct Uniforms {
     const float cy = (_bounds[1] + _bounds[4]) * 0.5f;
     const float cz = (_bounds[2] + _bounds[5]) * 0.5f;
 
-    const float cp = std::cos(_pitch), sp = std::sin(_pitch);
-    const float cyaw = std::cos(_yaw), syaw = std::sin(_yaw);
-    const float eye[3] = {cx + _distance * cp * syaw,
-                          cy + _distance * sp,
-                          cz + _distance * cp * cyaw};
-    const float target[3] = {cx, cy, cz};
+    float eye[3];
+    float target[3];
     const float up[3] = {0, 1, 0};
 
+    if (_fpsMode) {
+        // 第一人称：站在地面上，视线由 yaw/pitch 决定
+        eye[0] = _fpsPos[0]; eye[1] = _fpsPos[1]; eye[2] = _fpsPos[2];
+        const float cp2 = std::cos(_fpsPitch), sp2 = std::sin(_fpsPitch);
+        const float cy2 = std::cos(_fpsYaw), sy2 = std::sin(_fpsYaw);
+        // 前方向：yaw=0 朝 -Z
+        target[0] = eye[0] + cp2 * (-sy2);
+        target[1] = eye[1] + sp2;
+        target[2] = eye[2] + cp2 * (-cy2);
+    } else {
+        const float cp = std::cos(_pitch), sp = std::sin(_pitch);
+        const float cyaw = std::cos(_yaw), syaw = std::sin(_yaw);
+        eye[0] = cx + _distance * cp * syaw;
+        eye[1] = cy + _distance * sp;
+        eye[2] = cz + _distance * cp * cyaw;
+        target[0] = cx; target[1] = cy; target[2] = cz;
+    }
+
     const float aspect = (float)view.drawableSize.width / (float)view.drawableSize.height;
-    const float nearZ = _freeCam ? std::max(0.5f, _distance * 0.01f)
-                                 : (_distance * 0.01f + 0.05f);
-    const float farZ  = _freeCam ? std::max(8000.0f, _distance * 40.0f)
-                                 : (_distance * 20.0f + 2000.0f);
-    sa::Mat4 proj = sa::Mat4::perspective(_freeCam ? 1.15f : 1.0f, aspect, nearZ, farZ);
+    const float nearZ = _fpsMode ? 0.15f
+                       : (_freeCam ? std::max(0.5f, _distance * 0.01f)
+                                   : (_distance * 0.01f + 0.05f));
+    const float farZ  = _fpsMode ? 3000.0f
+                       : (_freeCam ? std::max(8000.0f, _distance * 40.0f)
+                                   : (_distance * 20.0f + 2000.0f));
+    sa::Mat4 proj = sa::Mat4::perspective(_fpsMode ? 1.35f : (_freeCam ? 1.15f : 1.0f),
+                                          aspect, nearZ, farZ);
     sa::Mat4 vw = sa::Mat4::lookAt(eye, target, up);
     sa::Mat4 model = sa::Mat4::identity();
     sa::Mat4 mvp = proj * vw * model;

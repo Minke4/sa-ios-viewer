@@ -26,6 +26,18 @@
 - (void)drawInView:(MTKView *)view;
 - (void)setSceneMode:(BOOL)scene;
 - (void)setDebugMode:(int)m;
+
+// 第一人称漫游
+- (void)setGroundData:(const float *)verts
+               vcount:(int)vcount
+              indices:(const unsigned int *)indices
+               icount:(int)icount
+           groundPath:(NSString *)path;
+- (void)setFirstPerson:(BOOL)on;
+- (BOOL)isFirstPerson;
+- (void)lookByDX:(float)dx dy:(float)dy;
+- (void)moveForward:(float)fwd right:(float)right dt:(float)dt;
+- (void)getFpsPosition:(float *)out;
 - (void)setOrbitScale:(float)s;
 - (void)getBounds:(float *)out;
 - (void)getCameraYaw:(float *)yaw pitch:(float *)pitch distance:(float *)dist;

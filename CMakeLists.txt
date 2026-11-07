@@ -15,6 +15,7 @@ add_library(sa_core STATIC
   src/store.cpp
   src/renderer.cpp
   src/pack.cpp
+  src/ground.cpp
 )
 target_link_libraries(sa_core PUBLIC z)
 target_include_directories(sa_core PUBLIC src)
@@ -27,6 +28,7 @@ if(SA_BUILD_IOS)
   add_executable(${APP_NAME}
     src/main_ios.mm
     src/metal_backend.mm
+    src/joystick.mm
     shaders/ModelRenderer.metal
   )
   target_link_libraries(${APP_NAME} PRIVATE sa_core)
@@ -86,8 +88,8 @@ if(SA_BUILD_IOS)
   set(SCENE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Resources/scene)
   file(GLOB SCENE_TEXES ${SCENE_DIR}/tex/*.png)
   target_sources(${APP_NAME} PRIVATE
-    ${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_TEXES})
-  set_source_files_properties(${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json PROPERTIES
+    ${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_DIR}/ground.bin ${SCENE_TEXES})
+  set_source_files_properties(${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_DIR}/ground.bin PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources/scene)
   set_source_files_properties(${SCENE_TEXES} PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources/scene/tex)

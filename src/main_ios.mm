@@ -15,6 +15,7 @@
 #include "renderer.h"
 #include "metal_backend.h"
 #include "pack.h"
+#import "joystick.h"
 
 // ---------------------------------------------------------------- 资源定位
 // 查找精简资源包（mesh.bin + tex/*.png），优先于 gta3.img
@@ -71,6 +72,11 @@ static NSString *SAFindModelsRoot(void) {
 @property (nonatomic, assign) float yaw, pitch;
 @property (nonatomic, assign) BOOL loaded;
 @property (nonatomic, assign) int debugMode;
+@property (nonatomic, strong) SAJoystickView *joystick;
+@property (nonatomic, strong) UIButton *modeButton;
+@property (nonatomic, assign) BOOL fpsMode;
+@property (nonatomic, assign) CFAbsoluteTime lastTick;
+@property (nonatomic, strong) CADisplayLink *tick;
 @end
 
 @implementation SAViewController
@@ -108,6 +114,27 @@ static NSString *SAFindModelsRoot(void) {
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     [self.view addGestureRecognizer:pan];
+
+    // 虚拟摇杆（左下）
+    const CGFloat js = 150;
+    self.joystick = [[SAJoystickView alloc] initWithFrame:
+        CGRectMake(30, self.view.bounds.size.height - js - 40, js, js)];
+    self.joystick.autoresizingMask = UIViewAutoresizingFlexibleTopMargin;
+    self.joystick.hidden = YES;
+    [self.view addSubview:self.joystick];
+
+    // 模式切换按钮（右下）
+    self.modeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.modeButton.frame = CGRectMake(self.view.bounds.size.width - 130,
+                                       self.view.bounds.size.height - 100, 110, 44);
+    self.modeButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleTopMargin;
+    [self.modeButton setTitle:@"进入漫游" forState:UIControlStateNormal];
+    [self.modeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.modeButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.15];
+    self.modeButton.layer.cornerRadius = 10;
+    [self.modeButton addTarget:self action:@selector(toggleMode) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.modeButton];
+    self.modeButton.hidden = YES;
     UIPinchGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handlePinch:)];
     [self.view addGestureRecognizer:pinch];
     // 双击切换调试视图：正常 / 贴图 / 法线 / 光照
@@ -120,10 +147,47 @@ static NSString *SAFindModelsRoot(void) {
 
 - (void)handlePan:(UIPanGestureRecognizer *)g {
     CGPoint t = [g translationInView:self.view];
+    if (self.fpsMode) {
+        // 只在屏幕右半区响应，避免和摇杆冲突
+        CGPoint loc = [g locationInView:self.view];
+        if (loc.x < self.view.bounds.size.width * 0.45) { [g setTranslation:CGPointZero inView:self.view]; return; }
+        [self.renderer lookByDX:(float)t.x dy:(float)t.y];
+        [g setTranslation:CGPointZero inView:self.view];
+        return;
+    }
     self.yaw -= (float)t.x * 0.008f;
     self.pitch += (float)t.y * 0.006f;
     self.pitch = fmaxf(-1.4f, fminf(1.4f, self.pitch));
     [g setTranslation:CGPointZero inView:self.view];
+}
+
+- (void)toggleMode {
+    self.fpsMode = !self.fpsMode;
+    [self.renderer setFirstPerson:self.fpsMode];
+    self.joystick.hidden = !self.fpsMode;
+    [self.modeButton setTitle:self.fpsMode ? @"退出漫游" : @"进入漫游" forState:UIControlStateNormal];
+    self.statusLabel.text = self.fpsMode ? @"左侧摇杆移动  ·  右侧拖拽转视角" : @"拖拽环绕  ·  双指缩放";
+    if (self.fpsMode && !self.tick) {
+        self.lastTick = CFAbsoluteTimeGetCurrent();
+        self.tick = [CADisplayLink displayLinkWithTarget:self selector:@selector(onTick:)];
+        [self.tick addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    } else if (!self.fpsMode && self.tick) {
+        [self.tick invalidate];
+        self.tick = nil;
+    }
+}
+
+- (void)onTick:(CADisplayLink *)link {
+    const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    float dt = (float)(now - self.lastTick);
+    self.lastTick = now;
+    if (dt > 0.1f) dt = 0.1f;
+    if (!self.fpsMode) return;
+    const float fwd = self.joystick.valueY;
+    const float right = self.joystick.valueX;
+    if (fabsf(fwd) > 0.01f || fabsf(right) > 0.01f) {
+        [self.renderer moveForward:fwd right:right dt:dt];
+    }
 }
 
 - (void)handleDoubleTap:(UITapGestureRecognizer *)g {
@@ -223,6 +287,16 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
             int noTex = 0;
             for (const auto &sm : pack.mesh.submeshes)
                 if (slot.find(sm.textureName) == slot.end()) ++noTex;
+            // 第一人称需要地面网格
+            if (isScene) {
+                NSString *groundPath = [bundlePath stringByAppendingPathComponent:@"ground.bin"];
+                [self.renderer setGroundData:(const float *)pack.mesh.vertices.data()
+                                      vcount:(int)pack.mesh.vertices.size()
+                                     indices:pack.mesh.indices.data()
+                                      icount:(int)pack.mesh.indices.size()
+                                  groundPath:groundPath];
+            }
+            self.modeButton.hidden = !isScene;
             self.infoLabel.text = [NSString stringWithFormat:
                 @"%@\n%d 顶点  %d 三角形\n子网格 %zu  ·  贴图 %zu（未绑定 %d）\n尺寸 %.0f×%.0f×%.0f",
                 isScene ? @"地图场景（Grove Street）" : @"资源包模式",
