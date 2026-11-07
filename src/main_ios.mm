@@ -25,6 +25,10 @@ static NSString *SAFindBundle(void) {
                                    inDomains:NSUserDomainMask] firstObject] path]
                       stringByAppendingPathComponent:@"pack"]];
     NSString *res = [[NSBundle mainBundle] resourcePath];
+    // 地图场景优先（内容更丰富）
+    [cands addObject:[[res stringByAppendingPathComponent:@"Resources"]
+                      stringByAppendingPathComponent:@"scene"]];
+    [cands addObject:[res stringByAppendingPathComponent:@"scene"]];
     [cands addObject:[[res stringByAppendingPathComponent:@"Resources"]
                       stringByAppendingPathComponent:@"pack"]];
     [cands addObject:[res stringByAppendingPathComponent:@"pack"]];
@@ -118,12 +122,13 @@ static NSString *SAFindModelsRoot(void) {
 }
 
 - (void)handlePinch:(UIPinchGestureRecognizer *)g {
-    float y, p, d;
-    [self.renderer getCameraYaw:&y pitch:&p distance:&d];
-    // 缩放通过移动相机实现：交给 renderer 的内部距离
-    static float baseDist = 0;
-    if (g.state == UIGestureRecognizerStateBegan) baseDist = d;
-    (void)baseDist;
+    if (g.state == UIGestureRecognizerStateBegan || g.state == UIGestureRecognizerStateChanged) {
+        const float s = (float)g.scale;
+        if (s > 0.01f) {
+            [self.renderer zoomBy:1.0f / s];
+            g.scale = 1.0f;
+        }
+    }
 }
 
 // 无游戏资源时的自测几何：一个带 UV 与法线的立方体，
@@ -192,16 +197,21 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
                                  texSlots:slots.data()
                                        num:(int)firsts.size()];
 
+            // 子网格数量很多说明是场景包
+            const BOOL isScene = pack.mesh.submeshes.size() > 40;
+            [self.renderer setSceneMode:isScene];
             self.loaded = YES;
             const float *b = pack.mesh.bounds;
             int noTex = 0;
             for (const auto &sm : pack.mesh.submeshes)
                 if (slot.find(sm.textureName) == slot.end()) ++noTex;
             self.infoLabel.text = [NSString stringWithFormat:
-                @"资源包模式\n%d 顶点  %d 三角形\n子网格 %zu  ·  贴图 %zu（未绑定 %d）\n尺寸 %.1f×%.1f×%.1f",
+                @"%@\n%d 顶点  %d 三角形\n子网格 %zu  ·  贴图 %zu（未绑定 %d）\n尺寸 %.0f×%.0f×%.0f",
+                isScene ? @"地图场景（Grove Street）" : @"资源包模式",
                 pack.vertexCount, pack.triangleCount, pack.mesh.submeshes.size(),
                 pack.textures.size(), noTex, b[3] - b[0], b[4] - b[1], b[5] - b[2]];
-            self.statusLabel.text = @"拖拽旋转";
+            self.statusLabel.text = isScene ? @"拖拽环绕  ·  双指缩放"
+                                            : @"拖拽旋转  ·  双指缩放";
             return;
         }
     }

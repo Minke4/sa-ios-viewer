@@ -82,6 +82,16 @@ if(SA_BUILD_IOS)
     ${PACK_DIR}/tex/ws_cheapodoor2.png
     ${PACK_DIR}/tex/examwind1_LAe.png
   )
+  # 地图场景包（Grove Street 区域）
+  set(SCENE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Resources/scene)
+  file(GLOB SCENE_TEXES ${SCENE_DIR}/tex/*.png)
+  target_sources(${APP_NAME} PRIVATE
+    ${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_TEXES})
+  set_source_files_properties(${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources/scene)
+  set_source_files_properties(${SCENE_TEXES} PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources/scene/tex)
+
   target_sources(${APP_NAME} PRIVATE ${PACK_MESH} ${PACK_META} ${PACK_TEXES})
   set_source_files_properties(${PACK_MESH} ${PACK_META} PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources/pack)

@@ -24,9 +24,12 @@
              texSlots:(const int *)texSlots
                   num:(int)num;
 - (void)drawInView:(MTKView *)view;
+- (void)setSceneMode:(BOOL)scene;
+- (void)setOrbitScale:(float)s;
 - (void)getBounds:(float *)out;
 - (void)getCameraYaw:(float *)yaw pitch:(float *)pitch distance:(float *)dist;
 - (void)setCameraYaw:(float)yaw pitch:(float)pitch;
+- (void)zoomBy:(float)factor;
 - (int)textureCount;
 - (int)indexCount;
 @end

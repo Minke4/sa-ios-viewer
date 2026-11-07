@@ -41,6 +41,8 @@ struct Uniforms {
     float _bounds[6];
     int   _indexCount;
     int   _textureCount;
+    BOOL  _freeCam;       // YES = 场景模式（绕场景中心大轨道飞行）
+    float _orbitScale;
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device {
@@ -51,6 +53,8 @@ struct Uniforms {
         _yaw = 0.6f;
         _pitch = 0.35f;
         _distance = 1.0f;
+        _freeCam = NO;
+        _orbitScale = 1.0f;
         [self buildPipelines];
     }
     return self;
@@ -128,6 +132,8 @@ struct Uniforms {
     float dx = bounds[3] - bounds[0], dy = bounds[4] - bounds[1], dz = bounds[5] - bounds[2];
     float radius = std::sqrt(dx * dx + dy * dy + dz * dz) * 0.5f;
     _distance = radius > 0.01f ? radius * 2.2f : 20.0f;
+    // 场景很大时拉近一些，避免全是天空
+    if (_freeCam && radius > 50.0f) _distance = radius * 1.4f;
     NSLog(@"SA: mesh 上传 %d 顶点 %d 索引，半径 %.2f", vcount, icount, radius);
 }
 
@@ -155,11 +161,14 @@ struct Uniforms {
         _subs.push_back({firstIndex[i], indexCount[i], texSlots[i]});
 }
 
+- (void)setSceneMode:(BOOL)scene { _freeCam = scene; }
+- (void)setOrbitScale:(float)s { _orbitScale = s; }
 - (void)getBounds:(float *)out { std::memcpy(out, _bounds, sizeof(_bounds)); }
 - (void)getCameraYaw:(float *)yaw pitch:(float *)pitch distance:(float *)dist {
     *yaw = _yaw; *pitch = _pitch; *dist = _distance;
 }
 - (void)setCameraYaw:(float)yaw pitch:(float)pitch { _yaw = yaw; _pitch = pitch; }
+- (void)zoomBy:(float)factor { _distance = std::fmax(0.5f, std::fmin(20000.0f, _distance * factor)); }
 - (int)textureCount { return _textureCount; }
 - (int)indexCount { return _indexCount; }
 
@@ -190,7 +199,11 @@ struct Uniforms {
     const float up[3] = {0, 1, 0};
 
     const float aspect = (float)view.drawableSize.width / (float)view.drawableSize.height;
-    sa::Mat4 proj = sa::Mat4::perspective(1.0f, aspect, _distance * 0.01f + 0.05f, _distance * 20.0f + 2000.0f);
+    const float nearZ = _freeCam ? std::max(0.5f, _distance * 0.01f)
+                                 : (_distance * 0.01f + 0.05f);
+    const float farZ  = _freeCam ? std::max(8000.0f, _distance * 40.0f)
+                                 : (_distance * 20.0f + 2000.0f);
+    sa::Mat4 proj = sa::Mat4::perspective(_freeCam ? 1.15f : 1.0f, aspect, nearZ, farZ);
     sa::Mat4 vw = sa::Mat4::lookAt(eye, target, up);
     sa::Mat4 model = sa::Mat4::identity();
     sa::Mat4 mvp = proj * vw * model;
