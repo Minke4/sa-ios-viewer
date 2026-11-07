@@ -128,9 +128,11 @@ static NSString *SAFindModelsRoot(void) {
 
 - (void)handleDoubleTap:(UITapGestureRecognizer *)g {
     self.debugMode = (self.debugMode + 1) % 7;
+    NSLog(@"SA: 调试视图切换到 %d", self.debugMode);
     [self.renderer setDebugMode:self.debugMode];
-    static const char *names[] = {"正常", "贴图原色", "法线", "光照", "UV", "贴图有无", "红通道"};
-    self.statusLabel.text = [NSString stringWithFormat:@"调试视图：%s", names[self.debugMode]];
+    NSArray *names = @[@"正常", @"贴图原色", @"法线", @"光照", @"UV", @"贴图有无", @"红通道"];
+    int idx = self.debugMode % (int)names.count;
+    self.statusLabel.text = [NSString stringWithFormat:@"调试视图：%@", names[idx]];
 }
 
 - (void)handlePinch:(UIPinchGestureRecognizer *)g {

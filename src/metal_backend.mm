@@ -14,13 +14,18 @@
 #include "metal_backend.h"
 #include "renderer.h"
 
+// 必须与 Metal 侧布局完全一致：Metal 的 float3 按 16 字节对齐，
+// 因此每个 float3 后面都要显式补 1 个 float，否则后续字段全部错位。
 struct Uniforms {
-    float mvp[16];
-    float model[16];
-    float lightDir[3];
-    float ambient;
-    float cameraPos[3];
-    float pad;
+    float mvp[16];       // 0..64
+    float model[16];     // 64..128
+    float lightDir[3];   // 128..140
+    float lightPad;      // 140..144
+    float ambient;       // 144..148
+    float ambientPad[3]; // 148..160
+    float cameraPos[3];  // 160..172
+    float pad;           // 172..176  ← 调试模式
+    float tail[4];       // 176..192 与 Metal 侧 float4 对齐一致
 };
 
 @implementation SAMetalRenderer {
@@ -228,6 +233,9 @@ struct Uniforms {
     Uniforms u;
     std::memcpy(u.mvp, mvp.m, sizeof(u.mvp));
     std::memcpy(u.model, model.m, sizeof(u.model));
+    u.lightPad = 0;
+    u.ambientPad[0] = u.ambientPad[1] = u.ambientPad[2] = 0;
+    u.tail[0] = u.tail[1] = u.tail[2] = u.tail[3] = 0;
     u.lightDir[0] = -0.4f; u.lightDir[1] = -0.85f; u.lightDir[2] = -0.3f;
     u.ambient = 0.45f;
     u.cameraPos[0] = eye[0]; u.cameraPos[1] = eye[1]; u.cameraPos[2] = eye[2];

@@ -9,13 +9,17 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// 与 C++ 侧逐字节对齐：float3 占 16 字节（含 4 字节 padding）
 struct Uniforms {
-    float4x4 mvp;
-    float4x4 model;
-    float3   lightDir;
-    float    ambient;
-    float3   cameraPos;
-    float    pad;
+    float4x4 mvp;        // 0
+    float4x4 model;      // 64
+    float3   lightDir;   // 128
+    float    lightPad;   // 140
+    float    ambient;    // 144
+    float4   ambientPad; // 148 → 补齐到 160
+    float3   cameraPos;  // 160
+    float    pad;        // 172  调试模式
+    float4   tail;       // 176 → 192
 };
 
 struct VSIn {
