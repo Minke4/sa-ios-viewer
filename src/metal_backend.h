@@ -28,6 +28,7 @@
               indices:(const unsigned int *)indices
                icount:(int)icount
            groundPath:(NSString *)path;
+- (void)setCollisionPath:(NSString *)path;
 - (void)setFirstPerson:(BOOL)on;
 - (BOOL)isFirstPerson;
 - (void)lookByDX:(float)dx dy:(float)dy;

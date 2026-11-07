@@ -331,6 +331,8 @@ static void buildSelfTestCube(sa::MeshData &mesh) {
                                      indices:pack.mesh.indices.data()
                                       icount:(int)pack.mesh.indices.size()
                                   groundPath:groundPath];
+                [self.renderer setCollisionPath:
+                    [bundlePath stringByAppendingPathComponent:@"collision.bin"]];
             }
             self.modeButton.hidden = !isScene;
             self.infoLabel.text = [NSString stringWithFormat:

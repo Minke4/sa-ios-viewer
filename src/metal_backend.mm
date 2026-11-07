@@ -15,6 +15,7 @@
 #include "metal_backend.h"
 #include "renderer.h"
 #include "ground.h"
+#include "collision.h"
 
 // 必须与 Metal 侧布局完全一致：Metal 的 float3 按 16 字节对齐，
 // 因此每个 float3 后面都要显式补 1 个 float，否则后续字段全部错位。
@@ -57,6 +58,7 @@ struct Uniforms {
     float _fpsPos[3];       // 摄像机世界坐标
     float _fpsYaw, _fpsPitch;
     std::unique_ptr<sa::GroundGrid> _ground;
+    std::unique_ptr<sa::CollisionWorld> _coll;
     float _eyeHeight;
     float _walkSpeed;
 }
@@ -215,6 +217,14 @@ struct Uniforms {
     }
 }
 
+- (void)setCollisionPath:(NSString *)path {
+    auto w = std::make_unique<sa::CollisionWorld>();
+    if (w->load([path UTF8String])) {
+        _coll = std::move(w);
+        NSLog(@"SA: 碰撞世界 %d 三角形", _coll->triangleCount());
+    }
+}
+
 - (void)setFirstPerson:(BOOL)on {
     _fpsMode = on;
     if (on) {
@@ -225,7 +235,9 @@ struct Uniforms {
         _fpsPitch = -0.05f;
         // 贴地
         float y = 0;
-        if (_ground && _ground->heightAt(_fpsPos[0], _fpsPos[2], y)) {
+        const bool gotY = _coll ? _coll->groundAt(_fpsPos[0], _fpsPos[2], y)
+                                : (_ground && _ground->heightAt(_fpsPos[0], _fpsPos[2], y));
+        if (gotY) {
             _fpsPos[1] = y + _eyeHeight;
         } else {
             _fpsPos[1] = (_bounds[1] + _bounds[4]) * 0.5f + _eyeHeight;
@@ -257,15 +269,36 @@ struct Uniforms {
     float nz = _fpsPos[2] + (fz * fwd + rz * right) * _walkSpeed * dt;
 
     float gy = 0;
-    if (_ground && _ground->heightAt(nx, nz, gy)) {
-        _fpsPos[0] = nx;
-        _fpsPos[2] = nz;
-        // 平滑贴地，避免台阶瞬跳
-        const float want = gy + _eyeHeight;
-        _fpsPos[1] += (want - _fpsPos[1]) * std::min(1.0f, dt * 12.0f);
-    } else {
-        // 前方没有地面就不动（避免掉出地图）
+    const bool haveGround = _coll ? _coll->groundAt(nx, nz, gy)
+                                  : (_ground && _ground->heightAt(nx, nz, gy));
+    if (!haveGround) return;   // 前方无地面不动
+
+    // 墙体阻挡：脚部高度做水平射线检测
+    if (_coll && _coll->blocked(_fpsPos[0], _fpsPos[2], nx, nz,
+                                _fpsPos[1] - _eyeHeight)) {
+        // 被挡住：尝试只沿 X 或只沿 Z 滑动
+        float yx = 0, yz = 0;
+        const float sx = _fpsPos[0] + (fx * fwd + rx * right) * _walkSpeed * dt;
+        const float sz = _fpsPos[2] + (fz * fwd + rz * right) * _walkSpeed * dt;
+        if (!_coll->blocked(_fpsPos[0], _fpsPos[2], sx, _fpsPos[2],
+                            _fpsPos[1] - _eyeHeight) &&
+            _coll->groundAt(sx, _fpsPos[2], yx)) {
+            _fpsPos[0] = sx;
+            _fpsPos[1] += (yx + _eyeHeight - _fpsPos[1]) * std::min(1.0f, dt * 12.0f);
+        } else if (!_coll->blocked(_fpsPos[0], _fpsPos[2], _fpsPos[0], sz,
+                                   _fpsPos[1] - _eyeHeight) &&
+                   _coll->groundAt(_fpsPos[0], sz, yz)) {
+            _fpsPos[2] = sz;
+            _fpsPos[1] += (yz + _eyeHeight - _fpsPos[1]) * std::min(1.0f, dt * 12.0f);
+        }
+        return;
     }
+
+    _fpsPos[0] = nx;
+    _fpsPos[2] = nz;
+    // 平滑贴地，避免台阶瞬跳
+    const float want = gy + _eyeHeight;
+    _fpsPos[1] += (want - _fpsPos[1]) * std::min(1.0f, dt * 12.0f);
 }
 
 - (void)getFpsPosition:(float *)out { std::memcpy(out, _fpsPos, sizeof(_fpsPos)); }

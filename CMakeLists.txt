@@ -16,6 +16,7 @@ add_library(sa_core STATIC
   src/renderer.cpp
   src/pack.cpp
   src/ground.cpp
+  src/collision.cpp
 )
 target_link_libraries(sa_core PUBLIC z)
 target_include_directories(sa_core PUBLIC src)
@@ -88,8 +89,8 @@ if(SA_BUILD_IOS)
   set(SCENE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Resources/scene)
   file(GLOB SCENE_TEXES ${SCENE_DIR}/tex/*.png)
   target_sources(${APP_NAME} PRIVATE
-    ${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_DIR}/ground.bin ${SCENE_TEXES})
-  set_source_files_properties(${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_DIR}/ground.bin PROPERTIES
+    ${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_DIR}/ground.bin ${SCENE_DIR}/collision.bin ${SCENE_TEXES})
+  set_source_files_properties(${SCENE_DIR}/mesh.bin ${SCENE_DIR}/meta.json ${SCENE_DIR}/ground.bin ${SCENE_DIR}/collision.bin PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources/scene)
   set_source_files_properties(${SCENE_TEXES} PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources/scene/tex)
