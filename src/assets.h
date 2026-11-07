@@ -109,6 +109,7 @@ struct Geometry {
     std::vector<float> uvs;         // 2 * n（可能为空）
     std::vector<uint8_t> prelit;    // 4 * n（可能为空）
     std::vector<uint32_t> indices;  // 3 * t（已展开的三角形索引）
+    std::vector<uint16_t> materialIds;  // t（每个三角形的材质索引）
     float sphere[4] = {0, 0, 0, 0};
     int materialCount = 0;
     std::vector<std::string> materialTextures;   // 每个几何体的材质贴图名

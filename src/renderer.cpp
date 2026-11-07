@@ -68,15 +68,10 @@ Mat4 Mat4::rotationX(float rad) {
 
 MeshData buildMesh(const Model &model) {
     MeshData md;
-    // 计算全局包围盒，便于相机构图
     float mn[3] = {1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f, -1e30f, -1e30f};
 
     for (const auto &g : model.geometries) {
-        SubMesh sm;
-        sm.firstIndex = (uint32_t)md.indices.size();
-        sm.textureName = g.materialTextures.empty() ? "" : g.materialTextures[0];
-
-        const uint32_t base = (uint32_t)md.vertices.size();
+        const uint32_t baseVertex = (uint32_t)md.vertices.size();
         const int nv = g.numVertices;
         for (int i = 0; i < nv; ++i) {
             Vertex v{};
@@ -92,8 +87,7 @@ MeshData buildMesh(const Model &model) {
                 v.uv[0] = g.uvs[i * 2 + 0];
                 v.uv[1] = g.uvs[i * 2 + 1];
             }
-            v.color[0] = v.color[1] = v.color[2] = 1.0f;
-            v.color[3] = 1.0f;
+            v.color[0] = v.color[1] = v.color[2] = v.color[3] = 1.0f;
             if (i * 4 + 3 < (int)g.prelit.size()) {
                 v.color[0] = g.prelit[i * 4 + 0] / 255.0f;
                 v.color[1] = g.prelit[i * 4 + 1] / 255.0f;
@@ -106,16 +100,31 @@ MeshData buildMesh(const Model &model) {
             }
             md.vertices.push_back(v);
         }
-        for (auto idx : g.indices) md.indices.push_back(base + idx);
-        sm.indexCount = (uint32_t)g.indices.size();
-        // 每个材质一个子网格（当前简化：整个几何体用一种贴图）
-        for (size_t mi = 0; mi < g.materialTextures.size(); ++mi) {
-            SubMesh s2 = sm;
-            s2.textureName = g.materialTextures[mi];
-            if (mi > 0) { s2.firstIndex = 0; s2.indexCount = 0; }  // 占位，后续细分
-            if (mi == 0) { sm.textureName = s2.textureName; }
+
+        // 按三角形自带的 materialId 分组，每个材质一个子网格
+        const size_t triCount = g.indices.size() / 3;
+        const size_t matCount = g.materialTextures.empty() ? 1 : g.materialTextures.size();
+        std::vector<std::vector<uint32_t>> byMat(matCount);
+        for (size_t t = 0; t < triCount; ++t) {
+            size_t m = 0;
+            if (t < g.materialIds.size()) {
+                const size_t id = g.materialIds[t];
+                m = id < matCount ? id : 0;
+            }
+            auto &dst = byMat[m];
+            dst.push_back(baseVertex + g.indices[t * 3 + 0]);
+            dst.push_back(baseVertex + g.indices[t * 3 + 1]);
+            dst.push_back(baseVertex + g.indices[t * 3 + 2]);
         }
-        md.submeshes.push_back(sm);
+        for (size_t m = 0; m < matCount; ++m) {
+            if (byMat[m].empty()) continue;
+            SubMesh sm;
+            sm.firstIndex = (uint32_t)md.indices.size();
+            sm.indexCount = (uint32_t)byMat[m].size();
+            sm.textureName = g.materialTextures.empty() ? "" : g.materialTextures[m];
+            md.indices.insert(md.indices.end(), byMat[m].begin(), byMat[m].end());
+            md.submeshes.push_back(sm);
+        }
     }
     std::memcpy(md.bounds, mn, sizeof(mn));
     std::memcpy(md.bounds + 3, mx, sizeof(mx));

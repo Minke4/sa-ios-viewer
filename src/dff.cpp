@@ -120,6 +120,7 @@ Geometry parseGeometry(const ChunkView &geo, uint32_t version) {
         // 三角形
         bool triOk = true;
         t.indices.resize((size_t)nTri * 3);
+        t.materialIds.resize((size_t)nTri);
         for (uint32_t i = 0; i < nTri && triOk; ++i) {
             uint32_t a = 0, b = 0;
             if (!rr.read(&a) || !rr.read(&b)) { triOk = false; break; }
@@ -128,6 +129,7 @@ Geometry parseGeometry(const ChunkView &geo, uint32_t version) {
             t.indices[(size_t)i * 3 + 0] = v0;
             t.indices[(size_t)i * 3 + 1] = v1;
             t.indices[(size_t)i * 3 + 2] = v2;
+            t.materialIds[(size_t)i] = (uint16_t)(b & 0xFFFF);
         }
         if (!triOk) continue;
 
