@@ -25,6 +25,11 @@ struct VSIn {
     float4 color    [[attribute(3)]];
 };
 
+struct FragmentParams {
+    int hasTexture;
+    int pad0, pad1, pad2;
+};
+
 struct VSOut {
     float4 position [[position]];
     float3 normal;
@@ -46,7 +51,8 @@ fragment float4 fs_main(VSOut in [[stage_in]],
                         constant Uniforms &u [[buffer(1)]],
                         texture2d<float> albedo [[texture(0)]],
                         sampler samp [[sampler(0)]],
-                        constant int &hasTexture [[buffer(2)]]) {
+                        constant FragmentParams &fp [[buffer(2)]]) {
+    const int hasTexture = fp.hasTexture;
     float3 base;
     float alpha = 1.0;
 
@@ -72,7 +78,19 @@ fragment float4 fs_main(VSOut in [[stage_in]],
     float ndl = fabs(dot(normalize(n), normalize(-u.lightDir)));
     float lit = u.ambient + (1.0 - u.ambient) * ndl;
 
-    // 调试：u.pad 用于切换输出（0=正常，1=贴图原色，2=法线，3=光照）
+    // 调试：u.pad 切换输出
+    // 0=正常 1=贴图原色 2=法线 3=光照 4=UV 5=贴图尺寸色 6=采样原始值
+    if (u.pad > 6.5) return float4(1.0, 0.0, 1.0, 1.0);          // 品红：走到这说明某种失败
+    if (u.pad > 5.5) {
+        if (hasTexture == 0) return float4(1.0, 0.0, 0.0, 1.0);
+        float4 raw = albedo.sample(samp, in.uv);
+        return float4(raw.r, 0.0, 0.0, 1.0);                      // 只看红通道
+    }
+    if (u.pad > 4.5) {
+        if (hasTexture == 0) return float4(0.0, 0.0, 1.0, 1.0);   // 蓝：没贴图
+        return float4(0.0, 1.0, 0.0, 1.0);                        // 绿：有贴图
+    }
+    if (u.pad > 3.5) return float4(fract(in.uv.x), fract(in.uv.y), 0.0, 1.0);
     if (u.pad > 2.5) return float4(lit, lit, lit, 1.0);
     if (u.pad > 1.5) return float4(fabs(n) * 0.5 + 0.5, 1.0);
     if (u.pad > 0.5) return float4(base, 1.0);

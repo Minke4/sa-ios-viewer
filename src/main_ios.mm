@@ -127,9 +127,9 @@ static NSString *SAFindModelsRoot(void) {
 }
 
 - (void)handleDoubleTap:(UITapGestureRecognizer *)g {
-    self.debugMode = (self.debugMode + 1) % 4;
+    self.debugMode = (self.debugMode + 1) % 7;
     [self.renderer setDebugMode:self.debugMode];
-    static const char *names[] = {"正常", "贴图原色", "法线", "光照"};
+    static const char *names[] = {"正常", "贴图原色", "法线", "光照", "UV", "贴图有无", "红通道"};
     self.statusLabel.text = [NSString stringWithFormat:@"调试视图：%s", names[self.debugMode]];
 }
 

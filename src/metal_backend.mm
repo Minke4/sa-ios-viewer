@@ -240,10 +240,12 @@ struct Uniforms {
     [enc setFragmentBytes:&u length:sizeof(u) atIndex:1];
 
     [enc setFragmentSamplerState:_sampler atIndex:0];
+    struct { int hasTexture; int p0, p1, p2; } fragParams = {0, 0, 0, 0};
 
     if (_subs.empty()) {
         int hasTex = _textureCount > 0 ? 1 : 0;
-        [enc setFragmentBytes:&hasTex length:sizeof(hasTex) atIndex:2];
+        fragParams.hasTexture = hasTex;
+        [enc setFragmentBytes:&fragParams length:sizeof(fragParams) atIndex:2];
         if (hasTex) {
             [enc setRenderPipelineState:_pipelineTextured];
             [enc setFragmentTexture:_textures[0] atIndex:0];
@@ -258,8 +260,8 @@ struct Uniforms {
     } else {
         // 先画有贴图的（pipeline 只设一次），再画无贴图的
         [enc setRenderPipelineState:_pipelineTextured];
-        int hasTexFlag = 1;
-        [enc setFragmentBytes:&hasTexFlag length:sizeof(hasTexFlag) atIndex:2];
+        fragParams.hasTexture = 1;
+        [enc setFragmentBytes:&fragParams length:sizeof(fragParams) atIndex:2];
         int lastTex = -1;
         for (const auto &sd : _subs) {
             if (sd.count == 0 || sd.tex < 0 || sd.tex >= (int)_textures.size()) continue;
